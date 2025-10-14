@@ -1,0 +1,11 @@
+[Unit]
+Description=Start all wallpaper services via the target
+# このサービスが起動する際に、wallpaper.target も起動させます
+Requires=wallpaper.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+
+[Install]
+WantedBy=wallpaper.target
