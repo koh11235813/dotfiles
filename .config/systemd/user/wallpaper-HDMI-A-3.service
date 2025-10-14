@@ -1,0 +1,15 @@
+[Unit]
+Description=mpvpaper for DP-2
+# このサービスを wallpaper.target の一部として定義します
+PartOf=wallpaper.target
+
+[Service]
+ExecStart=/usr/bin/mpvpaper HDMI-A-3 -o "--hwdec=vaapi-copy --vd-lavc-dr=no --loop-file=inf --no-audio" --auto-pause /home/kinoko/Videos/wallpaper/plana-blue-archive.1920x1080.mp4
+Restart=always
+RestartSec=1
+MemoryMax=1G
+MemoryHigh=800M
+
+[Install]
+# wallpaper.target が有効化された時に、このサービスも有効化されるようにします
+WantedBy=wallpaper.target

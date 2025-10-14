@@ -1,0 +1,8 @@
+[Unit]
+Description=Wallpaper Services Target
+# このターゲットが起動すると、以下のサービス群が起動します
+Wants=wallpaper-HDMI-A-3.service wallpaper-DP-3.service wallpaper-DP-4.service
+
+[Install]
+WantedBy=default.target
+

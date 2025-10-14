@@ -1,0 +1,13 @@
+[Unit]
+Description=Run wallpaper services a bit after graphical session starts
+
+[Timer]
+# ユーザーセッション開始の10秒後に wallpaper.service を起動
+OnStartupSec=10s
+Unit=wallpaper.service
+OnCalendar=*-*-* 00/3:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
