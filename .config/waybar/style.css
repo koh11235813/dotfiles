@@ -2,7 +2,7 @@
     border: none;
     border-radius: 0;
     min-height: 0;
-    font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK JP", "Symbols Nerd Font", sans-serif;
+    font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK JP", sans-serif;
     font-weight: 500;
     font-size: 14px;
     padding: 0;
@@ -47,11 +47,7 @@ tooltip {
 }
 
 #workspaces button.focused {
-    background-color: #7c6f64;
-    color: #ffffff;
-    border: 2px solid #ddc7a1;
-    border-radius: 4px;
-    padding: 2px 6px;
+    color: #ddc7a1;
 }
 
 #workspaces button.urgent {
@@ -102,7 +98,7 @@ tooltip {
     color: #c14a4a;
 }
 
-/* 髻ｳ驥上ヰ繝ｼ縺ｮ繧ｫ繧ｹ繧ｿ繝�陬�｣ｾ */
+/* 音量バーのカスタム装飾 */
 #custom-volume-ascii.critical {
     background-color: #ddc7a1;
     border: 2px solid #c7ab7a;
@@ -114,5 +110,3 @@ tooltip {
     border: 2px solid #c7ab7a;
     color: #b86018;
 }
-
-

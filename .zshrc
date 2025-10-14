@@ -6,8 +6,8 @@
 # Ignore duplicate history, Specify history length
 setopt hist_ignore_all_dups
 HISTFILE=~/.zsh_history
-HISTSIZE=1000
-SAVEHIST=2000
+HISTSIZE=2500
+SAVEHIST=5000
 setopt append_history       # Append to history file
 setopt share_history        # Share history with other terminals
 
@@ -40,6 +40,7 @@ alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 alias fgrep='fgrep --color=auto'
 alias egrep='egrep --color=auto'
+alias mkdir='mkdir -p'
 
 # ls
 alias ll='ls -alF'
@@ -65,7 +66,7 @@ if [[ -d /usr/local/etc/alias.d/ ]]; then
 fi
 
 # enable complite
-fpath+=(/Users/yamakawa_kohsuke/.zsh/plugins/zsh-completions/src $fpath)
+fpath=(~/.zsh/plugins/zsh-completions/src $fpath)
 autoload -Uz compinit
 compinit
 # Match uppercase and lowercase 
@@ -81,8 +82,8 @@ zstyle ':completion:*:sudo:*' command-path /usr/local/sbin /usr/local/bin \
 # process complite with ps 
 zstyle ':completion:*:processes' command 'ps x -o pid,s,args'
 
-source /home/kinoko/.zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.plugin.zsh 
-source /home/kinoko/.zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.plugin.zsh
+source ~/.zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+source ~/.zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
 
 # fpath+=${ZSH_CUSTOM:-${ZSH:-~/.zsh}}/plugins/zsh-completions/src
 # source "$ZSH/.zsh/"

@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 
 # 現在の音量（小数含む）
 vol=$(pactl get-sink-volume @DEFAULT_SINK@ | awk -F'/' '/Volume:/ {gsub(/%/, "", $2); print $2+0}' | head -1)
 
 # 音量が0の場合はMUTED表示＋critical判定用
 if (( $(echo "$vol == 0" | bc -l) )); then
-  echo "vol [░░░░░░░░░░] 0%"
+  echo "[🔇︎ ░░░░░░░░░░ 0%]"
   exit 0
 fi
 
@@ -25,6 +25,6 @@ for ((i=1; i<=10; i++)); do
 done
 
 # 最終表示
-# icon="🔈"  # 音量アイコン
+icon="🔉︎"  # 音量アイコン
 
-echo "vol [$bar] ${vol}%"
+echo "[$icon $bar ${vol}%]"

@@ -31,18 +31,16 @@
     "hyprland/workspaces": {
         "disable-scroll": true,
         "all-outputs": true,
-        "tooltip": false,
-        "presistent-workspaces": {
-            "*": [4, 5, 6, 9, 10 ],
-            "DP-4": [ 2 ],
-            "DP-3": [ 1, 7, 8 ],
-            "DP-2": [ 3 ]
-        }
+        "tooltip": false
     },
 
     "custom/window": {
-        "exec": "~/.config/waybar/scripts/window_title.sh",
-        "interval": 1
+        "exec": "/home/kinoko/.config/waybar/scripts/window_title.sh",
+        "interval": 1,
+	"restart-interval": 0,
+	"return-type": "plain",
+        "format": "{}",
+	"markup":false
     },
 
     "tray": {
@@ -51,30 +49,8 @@
     },
 
     "clock": {
-        "format": "{:%H:%M - %a, %d %b %Y}",
-        "tooltip": true,
-        "tooltip-format": "<tt><small>{calendar}</small></tt>",
-        "calendar": {
-            "mode"          : "year",
-            "mode-mon-col"  : 3,
-            "weeks-pos"     : "right",
-            "on-scroll"     : 1,
-            "on-click-right": "mode",
-            "format": {
-                "months":     "<span color='#ffead3'><b>{}</b></span>",
-                "days":       "<span color='#ecc6d9'><b>{}</b></span>",
-                "weeks":      "<span color='#99ffdd'><b>W{}</b></span>",
-                "weekdays":   "<span color='#ffcc66'><b>{}</b></span>",
-                "today":      "<span color='#ff6699'><b><u>{}</u></b></span>"
-            }
-        },
-        "actions": {
-            "on-click-right": "mode",
-            "on-click-forward": "tz_up",
-            "on-click-backward": "tz_down",
-            "on-scroll-up": "shift_up",
-            "on-scroll-down": "shift_down"
-        }
+        "format": "{:%H:%M %p - %a, %d %b %Y}",
+        "tooltip": true
     },
 
     "cpu": {
@@ -130,12 +106,11 @@
 
 
     "custom/power-menu": {
-        "format": "⏻",
+        "format": "⏻ power ",
         "on-click": "wlogout",
         "tooltip": true,
-        "tooltip-format": "Power"
+        "tooltip-format": "電源メニュー"
     }
 
 
 }
-
