@@ -1,0 +1,10 @@
+# Editor/backup files
+*~
+*.swp
+*.swo
+*.bak
+*.un~
+
+# App-generated state
+.config/zed/prompts/prompts-library-db*
+codex.sh
