@@ -102,10 +102,10 @@ tooltip {
 #custom-volume-ascii.critical {
     background-color: #ddc7a1;
     border: 2px solid #c7ab7a;
-    color: #c14a4a; 
+    color: #c14a4a;
 }
 
-#custom-volume-ascii.warnig {
+#custom-volume-ascii.warning {
     background-color: #ddc7a1;
     border: 2px solid #c7ab7a;
     color: #b86018;

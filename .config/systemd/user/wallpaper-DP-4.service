@@ -3,7 +3,7 @@ Description=mpvpaper for DP-4
 PartOf=wallpaper.target
 
 [Service]
-ExecStart=/usr/bin/mpvpaper DP-4 -o "--hwdec=vaapi-vopy --vd-lavc-dr=no --loop-file=inf --no-audio" --auto-pause /home/kinoko/Videos/wallpaper/kokkoro-princess-connect-redive.1920x1080.mp4
+ExecStart=/usr/bin/mpvpaper DP-4 -o "--hwdec=vaapi-vopy --vd-lavc-dr=no --loop-file=inf --no-audio" --auto-pause %h/Videos/wallpaper/kokkoro-princess-connect-redive.1920x1080.mp4
 Restart=always
 RestartSec=1
 MemoryMax=1G
