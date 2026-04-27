@@ -1,0 +1,230 @@
+# ~/.zshrc
+
+# Environment
+export LANG=en_US.UTF-8
+export EDITOR=vim
+
+# Exit when not interactive shell.
+[[ $- != *i* ]] && return
+
+# History
+HISTFILE=~/.zsh_history
+HISTSIZE=1000000
+SAVEHIST=1000000
+setopt append_history
+setopt extended_history
+setopt hist_ignore_all_dups
+setopt hist_reduce_blanks
+setopt share_history
+alias history='history -t "%F %T"'
+
+# Prompt / vcs_info
+autoload -Uz colors && colors
+autoload -Uz vcs_info
+
+setopt prompt_subst
+zstyle ':vcs_info:git:*' check-for-changes true
+zstyle ':vcs_info:git:*' stagedstr "%F{yellow}●%f"
+zstyle ':vcs_info:git:*' unstagedstr "%F{red}+%f"
+zstyle ':vcs_info:*' formats "%F{cyan}[%b%c%u%F{cyan}]%f"
+zstyle ':vcs_info:*' actionformats "%F{cyan}[%b|%a%F{cyan}]%f"
+
+PROMPT='%h %F{86}%n@%m%f:%F{blue}%~%f%b $ '
+RPROMPT='${vcs_info_msg_0_}'
+
+function add_line {
+  if [[ -z "${PS1_NEWLINE_LOGIN}" ]]; then
+    PS1_NEWLINE_LOGIN=true
+  else
+    printf '\n'
+  fi
+}
+
+precmd_functions+=(vcs_info add_line)
+
+# Options
+setopt auto_cd
+setopt auto_pushd
+setopt extended_glob
+setopt no_flow_control
+setopt print_eight_bit
+setopt pushd_ignore_dups
+
+# Key bindings
+autoload -Uz history-search-end
+zle -N history-beginning-search-backward-end history-search-end
+zle -N history-beginning-search-forward-end history-search-end
+bindkey '^p' history-beginning-search-backward-end
+bindkey '^n' history-beginning-search-forward-end
+bindkey '^R' history-incremental-pattern-search-backward
+bindkey '^A' beginning-of-line
+bindkey '^E' end-of-line
+bindkey '^K' kill-line
+bindkey '^U' backward-kill-line
+
+# Completion
+case ${OSTYPE} in
+  darwin*)
+    if [[ -d /opt/homebrew/share/zsh-completions ]]; then
+      fpath=(/opt/homebrew/share/zsh-completions $fpath)
+    elif [[ -d /usr/local/share/zsh-completions ]]; then
+      fpath=(/usr/local/share/zsh-completions $fpath)
+    fi
+    ;;
+  linux*)
+    fpath=("$HOME/.zsh/plugins/zsh-completions/src" $fpath)
+    ;;
+esac
+
+autoload -Uz compinit
+compinit
+
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
+zstyle ':completion:*' ignore-parents parent pwd ..
+zstyle ':completion:*:sudo:*' command-path /usr/local/sbin /usr/local/bin \
+  /usr/sbin /usr/bin /sbin /bin /usr/X11R6/bin
+zstyle ':completion:*:processes' command 'ps x -o pid,s,args'
+
+autoload -Uz select-word-style
+select-word-style default
+zstyle ':zle:*' word-chars " /=;@:{},|"
+zstyle ':zle:*' word-style unspecified
+
+# Common aliases
+alias la='ls -a'
+alias ll='ls -la'
+alias l='ls -l'
+alias mkdir='mkdir -p'
+alias sudo='sudo '
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'
+alias python='python3'
+alias pip='pip3'
+alias grep='grep --color=auto'
+alias -g L='| less'
+alias -g G='| grep'
+
+# OS-specific settings
+case ${OSTYPE} in
+  darwin*)
+    export CLICOLOR=1
+
+    if [[ -x /usr/libexec/path_helper ]]; then
+      eval "$(/usr/libexec/path_helper)"
+    fi
+
+    export PATH="/Library/Apple/usr/bin:/opt/homebrew/bin:/usr/local/bin:/usr/local/sbin:$PATH"
+
+    alias ls='ls -G -F'
+    alias -g C='| pbcopy'
+    alias -g libtool=glibtool
+    alias -g libtoolize=glibtoolize
+
+    export ACLOCAL_PATH="/opt/homebrew/share/aclocal:${ACLOCAL_PATH:-}"
+    export PATH="/opt/homebrew/opt/ruby@3.3/bin:$PATH"
+    export LDFLAGS="-L/opt/homebrew/opt/ruby@3.3/lib"
+    export CPPFLAGS="-I/opt/homebrew/opt/ruby@3.3/include"
+
+    export PATH="$HOME/.jenv/bin:$PATH"
+    if command -v jenv >/dev/null 2>&1; then
+      eval "$(jenv init -)"
+    fi
+
+    if [[ -f /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
+      source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+    elif [[ -f /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
+      source /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+    fi
+
+    if [[ -f /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
+      source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+    elif [[ -f /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
+      source /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+    fi
+    ;;
+
+  linux*)
+    [[ "$TERM" == "linux" ]] && export LANG=C.UTF-8
+
+    if [[ -x /usr/bin/lesspipe ]]; then
+      eval "$(SHELL=/bin/sh lesspipe)"
+    fi
+
+    if [[ -x /usr/bin/dircolors ]]; then
+      if [[ -r ~/.dircolors ]]; then
+        eval "$(dircolors -b ~/.dircolors)"
+      else
+        eval "$(dircolors -b)"
+      fi
+    fi
+
+    alias ls='ls -F --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+    alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history 1 | sed "s/^[ ]*[0-9]\+[ ]*//;s/[;&|]\s*alert$//")"'
+
+    if command -v xsel >/dev/null 2>&1; then
+      alias -g C='| xsel --input --clipboard'
+    fi
+
+    if [[ -f ~/.zsh_aliases ]]; then
+      source ~/.zsh_aliases
+    fi
+
+    if [[ -d /usr/local/etc/alias.d ]]; then
+      for i in /usr/local/etc/alias.d/*.sh; do
+        [[ -r $i ]] && source "$i" >/dev/null 2>&1
+      done
+      unset i
+    fi
+
+    if [[ -f /usr/share/nvm/init-nvm.sh ]]; then
+      source /usr/share/nvm/init-nvm.sh
+    fi
+
+    if [[ -f ~/.zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
+      source ~/.zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+    fi
+
+    if [[ -f ~/.zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
+      source ~/.zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+    fi
+    ;;
+esac
+
+# Common tools
+export PROTO_HOME="$HOME/.proto"
+export PATH="$PROTO_HOME/shims:$PROTO_HOME/bin:$HOME/.local/bin:$HOME/.local/share/npm/bin:$PATH"
+export UV_SKIP_WHEEL_FILENAME_CHECK=1
+export no_proxy="*.local,169.254/16"
+
+if command -v gem >/dev/null 2>&1; then
+  export GEM_HOME="$(gem env user_gemhome)"
+  export GEM_PATH="$GEM_HOME:${GEM_PATH:-}"
+  export PATH="$PATH:$GEM_HOME/bin"
+fi
+
+function wttr {
+  curl -H "Accept-Language: ${LANG%_*}" "wttr.in/${1:-ichinomiya}"
+}
+
+function delkasu {
+  find "$1" \( -name '.DS_Store' -o -name '._*' -o -name '.apdisk' -o -name 'Thumbs.db' -o -name 'Desktop.ini' \) -delete -print
+}
+
+# Rust (cargo)
+if [[ -f "$HOME/.cargo/env" ]]; then
+  source "$HOME/.cargo/env"
+fi
+
+# LM Studio CLI (lms)
+export PATH="$PATH:$HOME/.lmstudio/bin"
+
+# Antigravity
+export PATH="$PATH:$HOME/.antigravity/antigravity/bin"
+
+# Local environment
+if [[ -f "$HOME/.env" ]]; then
+  source "$HOME/.env"
+fi
