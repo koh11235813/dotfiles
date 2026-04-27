@@ -1,0 +1,121 @@
+" ~/.vimrc
+
+if v:progname =~? "evim"
+  finish
+endif
+
+if has("syntax")
+  syntax on
+endif
+
+source $VIMRUNTIME/defaults.vim
+
+" Display
+set number
+set relativenumber
+augroup numbertoggle
+  autocmd!
+  autocmd BufEnter,FocusGained,InsertLeave * set relativenumber
+  autocmd BufLeave,FocusLost,InsertEnter   * set norelativenumber
+augroup END
+
+" Indent
+set tabstop=4
+set shiftwidth=4
+set expandtab
+set autoindent
+set smartindent
+
+" Search
+set ignorecase
+set smartcase
+set incsearch
+set hlsearch
+
+" Behavior
+set hidden
+set lazyredraw
+set showcmd
+set laststatus=2
+set updatetime=300
+
+if has("patch-8.1.1564")
+  set signcolumn=number
+else
+  set signcolumn=yes
+endif
+
+" Completion
+set wildmode=list:longest,full
+set completeopt=menu,menuone,noselect
+
+" Backup, swap, undo, and view state
+set backupdir=~/.vim/backup//
+set directory=~/.vim/swap//
+set undodir=~/.vim/undo//
+set viewdir=~/.vim/view//
+silent !mkdir -p ~/.vim/backup ~/.vim/swap ~/.vim/undo ~/.vim/view
+
+if has("vms")
+  set nobackup
+else
+  set backup
+  if has("persistent_undo")
+    set undofile
+  endif
+endif
+
+augroup PersistentFolds
+  autocmd!
+  autocmd BufWritePost,BufWinLeave *
+        \ if expand('%:p') !=# '' && &buftype ==# '' | silent! mkview | endif
+  autocmd BufWinEnter *
+        \ if expand('%:p') !=# '' && &buftype ==# '' | silent! loadview | endif
+augroup END
+set viewoptions-=options
+
+augroup trim_trailing_whitespace
+  autocmd!
+  autocmd BufWritePre * %s/\s\+$//e
+augroup END
+
+set clipboard=unnamed,autoselect
+hi Comment ctermfg=3
+
+if has("syntax") && has("eval")
+  packadd! matchit
+endif
+
+call plug#begin('~/.vim/plugged')
+  Plug 'vim-airline/vim-airline'
+  Plug 'vim-airline/vim-airline-themes'
+  Plug 'luochen1990/rainbow'
+  Plug 'cocopon/iceberg.vim'
+  Plug 'rust-lang/rust.vim'
+  Plug 'scrooloose/nerdtree'
+  Plug 'jiangmiao/auto-pairs'
+  Plug 'dense-analysis/ale'
+  Plug 'davidhalter/jedi-vim'
+  Plug 'neoclide/coc.nvim', {'branch': 'release'}
+  Plug 'lervag/vimtex'
+  Plug 'xavierd/clang_complete'
+  Plug 'rhysd/vim-clang-format'
+call plug#end()
+
+filetype plugin indent on
+
+let g:rustfmt_autosave = 1
+let g:rainbow_active = 1
+let g:airline_theme = 'molokai'
+
+inoremap <silent><expr> <CR> pumvisible() ? coc#_select_confirm()
+      \ : "\<C-g>u\<CR>\<c-r>=coc#on_enter()\<CR>"
+
+nmap <silent> gd <Plug>(coc-definition)
+nmap <silent> gy <Plug>(coc-type-definition)
+nmap <silent> gi <Plug>(coc-implementation)
+nmap <silent> gr <Plug>(coc-references)
+
+set termguicolors
+colorscheme iceberg
+set background=dark

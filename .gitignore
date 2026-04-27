@@ -6,4 +6,6 @@
 *.un~
 
 # App-generated state
-.config/zed/prompts/prompts-library-db*
+dot_config/zed/prompts/prompts-library-db*
+dot_config/zed/conversations/
+dot_config/zed/themes/
