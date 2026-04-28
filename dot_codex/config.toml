@@ -1,0 +1,206 @@
+allow_login_shell = true
+approval_policy = "on-request"
+chatgpt_base_url = "https://chatgpt.com/backend-api/"
+check_for_update_on_startup = true
+cli_auth_credentials_store = "file"
+disable_paste_burst = false
+file_opener = "vscode"
+hide_agent_reasoning = false
+include_apply_patch_tool = false
+mcp_oauth_credentials_store = "auto"
+model = "gpt-5.4-mini"
+model_provider = "openai"
+model_reasoning_effort = "medium"
+model_verbosity = "medium"
+notify = []
+personality = "friendly"
+project_doc_fallback_filenames = ["CLAUDE.md"]
+project_doc_max_bytes = 32768
+sandbox_mode = "read-only"
+show_raw_agent_reasoning = false
+web_search = "cached"
+windows_wsl_setup_acknowledged = false
+
+[apps]
+
+[features]
+suppress_unstable_features_warning = true
+voice_transcription = true
+
+[feedback]
+enabled = true
+
+[history]
+persistence = "save-all"
+
+[marketplaces.openai-bundled]
+last_updated = "2026-04-28T15:11:32Z"
+source = "/Users/kinoko/.codex/.tmp/bundled-marketplaces/openai-bundled"
+source_type = "local"
+
+[marketplaces.openai-primary-runtime]
+last_updated = "2026-04-24T09:17:40Z"
+source = "/Users/kinoko/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+source_type = "local"
+
+[marketplaces.claude-plugins-official]
+last_updated = "2026-04-28T15:16:46Z"
+last_revision = "18113ade5c13cd90e669c650a58b1c815f0b158b"
+source_type = "git"
+source = "https://github.com/anthropics/claude-plugins-official.git"
+
+[marketplaces.openai-codex]
+last_updated = "2026-04-28T15:16:47Z"
+last_revision = "807e03ac9d5aa23bc395fdec8c3767500a86b3cf"
+source_type = "git"
+source = "https://github.com/openai/codex-plugin-cc.git"
+
+[mcp_servers.context7]
+args = [
+    "-y",
+    "@upstash/context7-mcp",
+]
+command = "npx"
+
+[mcp_servers.context7.env]
+MY_ENV_VAR = "$CONTEXT7_API_KEY"
+
+[model_providers]
+
+[notice.model_migrations]
+"gpt-5.4" = "gpt-5.5"
+
+[otel]
+environment = "dev"
+exporter = "none"
+log_user_prompt = false
+trace_exporter = "none"
+
+[plugins."browser-use@openai-bundled"]
+enabled = true
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."github@openai-curated"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."claude-md-management@claude-plugins-official"]
+enabled = true
+
+[plugins."code-review@claude-plugins-official"]
+enabled = true
+
+[plugins."commit-commands@claude-plugins-official"]
+enabled = true
+
+[plugins."context7@claude-plugins-official"]
+enabled = true
+
+[plugins."discord@claude-plugins-official"]
+enabled = true
+
+[plugins."github@claude-plugins-official"]
+enabled = true
+
+[plugins."skill-creator@claude-plugins-official"]
+enabled = true
+
+[plugins."supabase@claude-plugins-official"]
+enabled = true
+
+[plugins."codex@openai-codex"]
+enabled = true
+
+[plugins."computer-use@openai-bundled"]
+enabled = true
+
+[profiles]
+
+[projects."/Users/kinoko"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/.ssh"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/cfs/iris-data-lab-event-app"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/cefore"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/cefore-emu-koh11235813"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/cefore-emu-sslab"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/codex"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/dotfiles"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/koh11235813.github.io"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/ss-lab-tut.github.io"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/sslab"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Development/github/strongswan"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/Downloads"]
+trust_level = "trusted"
+
+[projects."/Users/kinoko/ix2215"]
+trust_level = "trusted"
+
+[projects."/Volumes/SSD_2TB/assets"]
+trust_level = "trusted"
+
+[sandbox_workspace_write]
+exclude_slash_tmp = false
+exclude_tmpdir_env_var = false
+network_access = false
+writable_roots = []
+
+[shell_environment_policy]
+exclude = []
+experimental_use_profile = false
+ignore_default_excludes = true
+include_only = []
+inherit = "all"
+
+[shell_environment_policy.set]
+CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1"
+
+[tui]
+animations = true
+notifications = false
+show_tooltips = true
+status_line = [
+    "current-dir",
+    "git-branch",
+    "model-with-reasoning",
+    "context-used",
+    "five-hour-limit",
+    "weekly-limit",
+    "used-tokens",
+    "fast-mode",
+]
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
