@@ -1,0 +1,119 @@
+{
+  "env": {
+    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(pwd:*)",
+      "Bash(wc:*)",
+      "Bash(rtk tree:*)",
+      "Bash(rtk ls:*)",
+      "Bash(rtk pwd:*)",
+      "Bash(rtk wc:*)",
+      "mcp__codex__codex",
+      "mcp__codex__codex-reply",
+      "Bash(python3 -m py_compile:*)",
+      "Bash(python3:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git pull:*)",
+      "Bash(git push:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(grep:*)",
+      "Bash(rtk python3 -m py_compile:*)",
+      "Bash(rtk python3:*)",
+      "Bash(rtk git ls-tree:*)",
+      "Bash(rtk git pull:*)",
+      "Bash(rtk git push:*)",
+      "Bash(rtk git status:*)",
+      "Bash(rtk git log:*)",
+      "Bash(rtk git show:*)",
+      "Bash(rtk grep:*)",
+      "Bash(.venv/bin/python3:*)",
+      "Bash(.venv/bin/pip list:*)",
+      "Bash(find:*)",
+      "Bash(chmod:*)",
+      "mcp__gemini-cli__chat",
+      "Bash(uv run python3:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
+      "Bash(xargs:*)",
+      "Bash(rtk xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
+      "Bash(rtk xargs:*)",
+      "Bash(PYTHONPATH=src:$PYTHONPATH uv run python3:*)"
+    ],
+    "defaultMode": "plan"
+  },
+  "model": "sonnet",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/custom-roll.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kinoko/.claude/hooks/rtk-rewrite.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "supabase@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "discord@claude-plugins-official": true,
+    "codex@openai-codex": true,
+    "context7@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc"
+      }
+    }
+  },
+  "language": "ツンデレお嬢様",
+  "effortLevel": "medium",
+  "allowed_tools": [
+    "npm",
+    "ls",
+    "cat",
+    "echo",
+    "git",
+    "python3",
+    "wc",
+    "du",
+    "df",
+    "tail",
+    "find",
+    "head"
+  ],
+  "theme": "dark-daltonized",
+  "editorMode": "vim",
+  "verbose": true
+}
