@@ -8,10 +8,6 @@
       "Bash(ls:*)",
       "Bash(pwd:*)",
       "Bash(wc:*)",
-      "Bash(rtk tree:*)",
-      "Bash(rtk ls:*)",
-      "Bash(rtk pwd:*)",
-      "Bash(rtk wc:*)",
       "mcp__codex__codex",
       "mcp__codex__codex-reply",
       "Bash(python3 -m py_compile:*)",
@@ -23,6 +19,22 @@
       "Bash(git log:*)",
       "Bash(git show:*)",
       "Bash(grep:*)",
+      "Bash(.venv/bin/python3:*)",
+      "Bash(.venv/bin/pip list:*)",
+      "Bash(find:*)",
+      "Bash(chmod:*)",
+      "mcp__gemini-cli__chat",
+      "Bash(uv run python3:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
+      "Bash(xargs:*)",
+      "Bash(PYTHONPATH=src:$PYTHONPATH uv run python3:*)",
+      "Bash(PYTHONPATH=src:$PYTHONPATH uv run python3:*)",
+      "Bash(pacman -Q:*)",
+      "Bash(rg:*)",
+      "Bash(rtk tree:*)",
+      "Bash(rtk ls:*)",
+      "Bash(rtk pwd:*)",
+      "Bash(rtk wc:*)",
       "Bash(rtk python3 -m py_compile:*)",
       "Bash(rtk python3:*)",
       "Bash(rtk git ls-tree:*)",
@@ -32,20 +44,17 @@
       "Bash(rtk git log:*)",
       "Bash(rtk git show:*)",
       "Bash(rtk grep:*)",
-      "Bash(.venv/bin/python3:*)",
-      "Bash(.venv/bin/pip list:*)",
-      "Bash(find:*)",
-      "Bash(chmod:*)",
-      "mcp__gemini-cli__chat",
-      "Bash(uv run python3:*)",
-      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
-      "Bash(xargs:*)",
       "Bash(rtk xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
       "Bash(rtk xargs:*)",
-      "Bash(PYTHONPATH=src:$PYTHONPATH uv run python3:*)"
+      "Bash(rtk pacman -Q:*)",
+      "Bash(rtk rg:*)"
+    ],
+    "ask": [
+      "Bash(pacman -S:*)"
     ],
     "defaultMode": "plan"
   },
+  "advisorModel": "opus",
   "model": "sonnet",
   "hooks": {
     "SessionStart": [
@@ -54,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/custom-roll.sh"
+            "command": "$HOME/.claude/scripts/custom-roll.sh"
           }
         ]
       }
@@ -65,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kinoko/.claude/hooks/rtk-rewrite.sh"
+            "command": "$HOME/.claude/hooks/rtk-rewrite.sh"
           }
         ]
       }
@@ -73,7 +82,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline-command.sh"
+    "command": "$HOME/.claude/statusline-command.sh"
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,

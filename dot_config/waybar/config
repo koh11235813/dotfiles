@@ -10,8 +10,9 @@
 
     "modules-left": [
         "clock",
+	"network",
         "custom/window"
-        
+
     ],
 
     "modules-center": [
@@ -19,11 +20,12 @@
     ],
 
     "modules-right": [
-        "tray", 
+        "power-profiles-daemon",
+        "tray",
         "cpu",
         "memory",
-        "custom/gpu-usage", 
-        "network",
+        "custom/gpu-usage",
+	"systemd-failed-units",
         "custom/volume-ascii",
         "custom/power-menu"
     ],
@@ -47,16 +49,35 @@
         "spacing": 10,
         "tooltip": false
     },
-
     "clock": {
-        "format": "{:%H:%M %p - %a, %d %b %Y}",
-        "tooltip": true
-    },
-
+        "format": "{:%H:%M - %a, %d %b %Y}",
+        "format-alt":"{:L%A, %B %d, %Y (%R)}  ",
+        "tooltip-format": "<big>{:%Y %B %d}</big>\n<tt>{calendar}</tt>",
+        "tooltip": true,
+        "calendar": {
+            "mode"          : "year",
+            "mode-mon-col"  : 3,
+            "weeks-pos"     : "right",
+            "on-scroll"     : 1,
+            "format": {
+                "months":     "<span color='#ffead3'><b>{}</b></span>",
+                "days":       "<span color='#ecc6d9'><b>{}</b></span>",
+                "weeks":      "<span color='#99ffdd'><b>W{}</b></span>",
+                "weekdays":   "<span color='#ffcc66'><b>{}</b></span>",
+                "today":      "<span color='#ff6699'><b><u>{}</u></b></span>"
+            }
+        },
+        "actions":  {
+            "on-click-right": "mode",
+            "on-scroll-up": "tz_up",
+            "on-scroll-down": "tz_down",
+            "on-scroll-up": "shift_up",
+            "on-scroll-down": "shift_down"
+            }
+        },
     "cpu": {
         "format": "cpu {usage}%",
         "interval": 1,
-
         "states": {
             "critical": 90
         }
@@ -84,11 +105,15 @@
 
 
     "network": {
-        "format-wifi" : "wifi {bandwidthDownBits}",
-        "format-ethernet": "eth {bandwidthDownBits}",
+        "format-wifi" : "wifi ↑{bandwidthUpBits}| ↓{bandwidthDownBits}",
+        "format-ethernet": "eth ↑{bandwidthUpBits} | ↓{bandwidthDownBits}",
         "format-disconnected" : "no network",
+        "tooltip-format": "{ifname} via {gwaddr} 󰊗",
+        "tooltip-format-wifi": "{essid} ({signalStrength}%)   {ipaddr}/{cidr}",
+	"tooltip-format-ethernet": "{ifname}   {ipaddr}/{cidr}",
+	"tooltip-format-disconnected": "Disconnected",
         "interval": 1,
-        "tooltip": false
+        "max-length": 40
     },
 
     "custom/volume-ascii": {
@@ -103,11 +128,27 @@
             "warning": "\\[.*([1]?[0-9]%|20).*\\]"
         }
     },
-
-
+    "power-profiles-daemon": {
+        "format": "{icon} ",
+        "tooltip-format": "Power profile: {profile}\nDriver: {driver}",
+        "tooltip": true,
+        "format-icons": {
+            "default": "",
+            "performance": "",
+            "balanced": "",
+            "power-saver": ""
+        }
+    },
+    "systemd-failed-units": {
+        "hide-on-ok": false, // Do not hide if there is zero failed units.
+        "format": "✗ {nr_failed}",
+        "format-ok": "✓",
+        "system": true, // Monitor failed systemwide units.
+        "user": false // Ignore failed user units.
+    },
     "custom/power-menu": {
         "format": "⏻ power ",
-        "on-click": "wlogout",
+        "on-click": "~/.config/waybar/scripts/power_menu.sh",
         "tooltip": true,
         "tooltip-format": "電源メニュー"
     }

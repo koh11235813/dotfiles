@@ -1,206 +1,532 @@
-allow_login_shell = true
-approval_policy = "on-request"
-chatgpt_base_url = "https://chatgpt.com/backend-api/"
-check_for_update_on_startup = true
-cli_auth_credentials_store = "file"
-disable_paste_burst = false
-file_opener = "vscode"
-hide_agent_reasoning = false
-include_apply_patch_tool = false
-mcp_oauth_credentials_store = "auto"
-model = "gpt-5.4-mini"
-model_provider = "openai"
-model_reasoning_effort = "medium"
-model_verbosity = "medium"
-notify = []
+# Codex example configuration (config.toml)
+#
+# This file lists all keys Codex reads from config.toml, their default values,
+# and concise explanations. Values here mirror the effective defaults compiled
+# into the CLI. Adjust as needed.
+#
+# Notes
+# - Root keys must appear before tables in TOML.
+# - Optional keys that default to "unset" are shown commented out with notes.
+# - MCP servers, profiles, and model providers are examples; remove or edit.
+
+################################################################################
+# Core Model Selection
+################################################################################
+
+# Primary model used by Codex. Default: "gpt-5.2-codex" on all platforms.
+model = "gpt-5.5"
+# Default communication style for supported models. Default: "friendly".
+# Allowed values: none | friendly | pragmatic
 personality = "friendly"
-project_doc_fallback_filenames = ["CLAUDE.md"]
-project_doc_max_bytes = 32768
+
+# Optional model override for /review. Default: unset (uses current session model).
+# review_model = "gpt-5.2-codex"
+
+# Provider id selected from [model_providers]. Default: "openai".
+model_provider = "openai"
+
+# Default OSS provider for --oss sessions. When unset, Codex prompts. Default: unset.
+# oss_provider = "ollama"
+
+# Optional manual model metadata. When unset, Codex auto-detects from model.
+# Uncomment to force values.
+model_context_window = 258000       # tokens; default: auto for model
+model_auto_compact_token_limit = 200000  # tokens; unset uses model defaults
+# tool_output_token_limit = 10000     # tokens stored per tool output; default: 10000 for gpt-5.2-codex
+# model_catalog_json = "/absolute/path/to/models.json" # optional startup-only model catalog override
+# background_terminal_max_timeout = 300000 # ms; max empty write_stdin poll window (default 5m)
+# log_dir = "/absolute/path/to/codex-logs" # directory for Codex logs; default: "$CODEX_HOME/log"
+
+################################################################################
+# Reasoning & Verbosity (Responses API capable models)
+################################################################################
+
+# Reasoning effort: minimal | low | medium | high | xhigh (default: medium; xhigh on gpt-5.2-codex and gpt-5.2)
+model_reasoning_effort = "medium"
+plan_mode_reasoning_effort = "medium"
+
+# Reasoning summary: auto | concise | detailed | none (default: auto)
+# model_reasoning_summary = "auto"
+
+# Text verbosity for GPT-5 family (Responses API): low | medium | high (default: medium)
+model_verbosity = "medium"
+
+# Force enable or disable reasoning summaries for current model
+# model_supports_reasoning_summaries = true
+
+################################################################################
+# Instruction Overrides
+################################################################################
+
+# Additional user instructions are injected before AGENTS.md. Default: unset.
+# developer_instructions = ""
+
+# (Ignored) Optional legacy base instructions override (prefer AGENTS.md). Default: unset.
+# instructions = ""
+
+# Inline override for the history compaction prompt. Default: unset.
+# compact_prompt = ""
+
+# Override built-in base instructions with a file path. Default: unset.
+# model_instructions_file = "/absolute/or/relative/path/to/instructions.txt"
+
+# Migration note: experimental_instructions_file was renamed to model_instructions_file (deprecated).
+
+# Load the compact prompt override from a file. Default: unset.
+# experimental_compact_prompt_file = "/absolute/or/relative/path/to/compact_prompt.txt"
+
+# Legacy name for apply_patch_freeform. Default: false
+include_apply_patch_tool = false
+
+
+################################################################################
+# Notifications
+################################################################################
+
+# External notifier program (argv array). When unset: disabled.
+# Example: notify = ["notify-send", "Codex"]
+notify = [ "notify-send", "Codex need reply"]
+
+
+################################################################################
+# Approval & Sandbox
+################################################################################
+
+# When to ask for command approval:
+# - untrusted: only known-safe read-only commands auto-run; others prompt
+# - on-request: model decides when to ask (default)
+# - never: never prompt (risky)
+# - { reject = { ... } }: auto-reject selected prompt categories
+approval_policy = "untrusted"
+# Example granular auto-reject policy:
+# approval_policy = { reject = { sandbox_approval = true, rules = false, mcp_elicitations = false } }
+
+# Allow login-shell semantics for shell-based tools when they request `login = true`.
+# Default: true. Set false to force non-login shells and reject explicit login-shell requests.
+allow_login_shell = true
+
+# Filesystem/network sandbox policy for tool calls:
+# - read-only (default)
+# - workspace-write
+# - danger-full-access (no sandbox; extremely risky)
 sandbox_mode = "read-only"
+
+################################################################################
+# Authentication & Login
+################################################################################
+
+# Where to persist CLI login credentials: file (default) | keyring | auto
+cli_auth_credentials_store = "file"
+
+# Base URL for ChatGPT auth flow (not OpenAI API). Default:
+chatgpt_base_url = "https://chatgpt.com/backend-api/"
+
+# Restrict ChatGPT login to a specific workspace id. Default: unset.
+# forced_chatgpt_workspace_id = ""
+
+# Force login mechanism when Codex would normally auto-select. Default: unset.
+# Allowed values: chatgpt | api
+# forced_login_method = "chatgpt"
+
+# Preferred store for MCP OAuth credentials: auto (default) | file | keyring
+mcp_oauth_credentials_store = "auto"
+
+# Optional fixed port for MCP OAuth callback: 1-65535. Default: unset.
+# mcp_oauth_callback_port = 4321
+
+# Optional redirect URI override for MCP OAuth login (for example, remote devbox ingress).
+# Custom callback paths are supported. `mcp_oauth_callback_port` still controls the listener port.
+# mcp_oauth_callback_url = "https://devbox.example.internal/callback"
+
+################################################################################
+# Project Documentation Controls
+################################################################################
+
+# Max bytes from AGENTS.md to embed into first-turn instructions. Default: 32768
+project_doc_max_bytes = 32768
+
+# Ordered fallbacks when AGENTS.md is missing at a directory level. Default: []
+project_doc_fallback_filenames = ["CLAUDE.md"]
+
+# Project root marker filenames used when searching parent directories. Default: [".git"]
+# project_root_markers = [".git"]
+
+################################################################################
+# History & File Opener
+################################################################################
+
+# URI scheme for clickable citations: vscode (default) | vscode-insiders | windsurf | cursor | none
+file_opener = "vscode"
+
+################################################################################
+# UI, Notifications, and Misc
+################################################################################
+
+# Suppress internal reasoning events from output. Default: false
+hide_agent_reasoning = false
+
+# Show raw reasoning content when available. Default: false
 show_raw_agent_reasoning = false
-web_search = "cached"
+
+# Disable burst-paste detection in the TUI. Default: false
+disable_paste_burst = false
+
+# Track Windows onboarding acknowledgement (Windows only). Default: false
 windows_wsl_setup_acknowledged = false
 
-[apps]
+# Check for updates on startup. Default: true
+check_for_update_on_startup = true
 
-[features]
-suppress_unstable_features_warning = true
-voice_transcription = true
+################################################################################
+# Web Search
+################################################################################
 
+# Web search mode: disabled | cached | live. Default: "cached"
+# cached serves results from a web search cache (an OpenAI-maintained index).
+# cached returns pre-indexed results; live fetches the most recent data.
+# If you use --yolo or another full access sandbox setting, web search defaults to live.
+web_search = "cached"
+approvals_reviewer = "user"
+
+################################################################################
+# Profiles (named presets)
+################################################################################
+
+# Active profile name. When unset, no profile is applied.
+# profile = "default"
+
+################################################################################
+# Agents (multi-agent roles and limits)
+################################################################################
+
+# [agents]
+# Maximum concurrently open agent threads. Default: 6
+# max_threads = 6
+# Maximum nested spawn depth. Root session starts at depth 0. Default: 1
+# max_depth = 1
+
+# [agents.reviewer]
+# description = "Find security, correctness, and test risks in code."
+# config_file = "./agents/reviewer.toml"  # relative to the config.toml that defines it
+
+################################################################################
+# Skills (per-skill overrides)
+################################################################################
+
+# Disable or re-enable a specific skill without deleting it.
+# [skills.config]
+# path = "/path/to/skill"
+# enabled = false
+
+################################################################################
+# Experimental toggles (legacy; prefer [features])
+################################################################################
+
+# experimental_use_unified_exec_tool = false
+
+# Include apply_patch via freeform editing path (affects default tool set). Default: false
+# experimental_use_freeform_apply_patch = false
+
+################################################################################
+# Sandbox settings (tables)
+################################################################################
+
+# Extra settings used only when sandbox_mode = "workspace-write".
+[sandbox_workspace_write]
+# Additional writable roots beyond the workspace (cwd). Default: []
+writable_roots = []
+# Allow outbound network access inside the sandbox. Default: false
+network_access = false
+# Exclude $TMPDIR from writable roots. Default: false
+exclude_tmpdir_env_var = false
+# Exclude /tmp from writable roots. Default: false
+exclude_slash_tmp = false
+
+################################################################################
+# Shell Environment Policy for spawned processes (table)
+################################################################################
+
+[shell_environment_policy]
+# inherit: all (default) | core | none
+inherit = "all"
+# Skip default excludes for names containing KEY/SECRET/TOKEN (case-insensitive). Default: true
+ignore_default_excludes = true
+# Case-insensitive glob patterns to remove (e.g., "AWS_*", "AZURE_*"). Default: []
+exclude = []
+# Explicit key/value overrides (always win). Default: {}
+set = {}
+# Whitelist; if non-empty, keep only matching vars. Default: []
+include_only = []
+# Experimental: run via user shell profile. Default: false
+experimental_use_profile = false
+
+################################################################################
+# History (table)
+################################################################################
+
+[history]
+# save-all (default) | none
+persistence = "save-all"
+# Maximum bytes for history file; oldest entries are trimmed when exceeded. Example: 5242880
+# max_bytes = 0
+
+################################################################################
+# UI, Notifications, and Misc (tables)
+################################################################################
+
+[tui]
+# Desktop notifications from the TUI: boolean or filtered list. Default: true
+# Examples: false | ["agent-turn-complete", "approval-requested"]
+notifications = false
+
+# Notification mechanism for terminal alerts: auto | osc9 | bel. Default: "auto"
+# notification_method = "auto"
+
+# Enables welcome/status/spinner animations. Default: true
+animations = true
+
+# Show onboarding tooltips in the welcome screen. Default: true
+show_tooltips = true
+theme = "catppuccin-mocha"
+status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-usage", "five-hour-limit", "weekly-limit", "context-window-size", "fast-mode"]
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
+
+# Control alternate screen usage (auto skips it in Zellij to preserve scrollback).
+# alternate_screen = "auto"
+
+# Ordered list of footer status-line item IDs. When unset, Codex uses:
+# ["model-with-reasoning", "context-remaining", "current-dir"].
+# Set to [] to hide the footer.
+# status_line = ["model", "context-remaining", "git-branch"]
+
+# Syntax-highlighting theme (kebab-case). Use /theme in the TUI to preview and save.
+# You can also add custom .tmTheme files under $CODEX_HOME/themes.
+# theme = "catppuccin-mocha"
+
+# Control whether users can submit feedback from `/feedback`. Default: true
 [feedback]
 enabled = true
 
-[history]
-persistence = "save-all"
+# In-product notices (mostly set automatically by Codex).
+[notice]
 
-[marketplaces.openai-bundled]
-last_updated = "2026-04-28T15:11:32Z"
-source = "/Users/kinoko/.codex/.tmp/bundled-marketplaces/openai-bundled"
-source_type = "local"
+[notice.model_migrations]
+# "gpt-5.3-codex" = "gpt-5.5"
+# hide_full_access_warning = true
+# hide_world_writable_warning = true
+# hide_rate_limit_model_nudge = true
+# hide_gpt5_1_migration_prompt = true
+# "hide_gpt-5.1-codex-max_migration_prompt" = true
+# model_migrations = { "gpt-4.1" = "gpt-5.1" }
 
-[marketplaces.openai-primary-runtime]
-last_updated = "2026-04-24T09:17:40Z"
-source = "/Users/kinoko/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
-source_type = "local"
+# Suppress the warning shown when under-development feature flags are enabled.
+# suppress_unstable_features_warning = true
 
-[marketplaces.claude-plugins-official]
-last_updated = "2026-04-28T15:16:46Z"
-last_revision = "18113ade5c13cd90e669c650a58b1c815f0b158b"
-source_type = "git"
-source = "https://github.com/anthropics/claude-plugins-official.git"
+################################################################################
+# Centralized Feature Flags (preferred)
+################################################################################
 
-[marketplaces.openai-codex]
-last_updated = "2026-04-28T15:16:47Z"
-last_revision = "807e03ac9d5aa23bc395fdec8c3767500a86b3cf"
-source_type = "git"
-source = "https://github.com/openai/codex-plugin-cc.git"
+[features]
+# Leave this table empty to accept defaults. Set explicit booleans to opt in/out.
+# shell_tool = true
+# apps = false
+# apps_mcp_gateway = false
+# web_search_cached = false
+# web_search_request = false
+# unified_exec = false
+# shell_snapshot = false
+# apply_patch_freeform = false
+# multi_agent = false
+# search_tool = false
+# personality = true
+# request_rule = true
+# collaboration_modes = true
+# use_linux_sandbox_bwrap = false
+# remote_models = false
+# runtime_metrics = false
+# powershell_utf8 = true
+# child_agents_md = false
+# voice_transcription = false
+# suppress_unstable_features_warning = true
+
+
+################################################################################
+# Define MCP servers under this table. Leave empty to disable.
+################################################################################
+
+[mcp_servers]
 
 [mcp_servers.context7]
-args = [
-    "-y",
-    "@upstash/context7-mcp",
-]
 command = "npx"
+args = ["-y", "@upstash/context7-mcp", "--api-key", "$CONTEXT7_API_KEY"]
+startup_timeout_sec = 20.0
 
-[mcp_servers.context7.env]
-MY_ENV_VAR = "$CONTEXT7_API_KEY"
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = ["chrome-devtools-mcp@latest"]
+
+
+################################################################################
+# Model Providers
+################################################################################
+
+# Built-ins include:
+# - openai (Responses API; requires login or OPENAI_API_KEY via auth flow)
+# - oss (Chat Completions API; defaults to http://localhost:11434/v1)
 
 [model_providers]
 
-[notice.model_migrations]
-"gpt-5.4" = "gpt-5.5"
+# --- Example: OpenAI data residency with explicit base URL or headers ---
+# [model_providers.openaidr]
+# name = "OpenAI Data Residency"
+# base_url = "https://us.api.openai.com/v1"        # example with 'us' domain prefix
+# wire_api = "responses"                           # "responses" | "chat" (default varies)
+# # requires_openai_auth = true                    # built-in OpenAI defaults to true
+# # request_max_retries = 4                        # default 4; max 100
+# # stream_max_retries = 5                         # default 5;  max 100
+# # stream_idle_timeout_ms = 300000                # default 300_000 (5m)
+# # experimental_bearer_token = "sk-example"       # optional dev-only direct bearer token
+# # http_headers = { "X-Example" = "value" }
+# # env_http_headers = { "OpenAI-Organization" = "OPENAI_ORGANIZATION", "OpenAI-Project" = "OPENAI_PROJECT" }
+
+# --- Example: Azure (Chat/Responses depending on endpoint) ---
+# [model_providers.azure]
+# name = "Azure"
+# base_url = "https://YOUR_PROJECT_NAME.openai.azure.com/openai"
+# wire_api = "responses"                          # or "chat" per endpoint
+# query_params = { api-version = "2025-04-01-preview" }
+# env_key = "AZURE_OPENAI_API_KEY"
+# # env_key_instructions = "Set AZURE_OPENAI_API_KEY in your environment"
+
+# --- Example: Local OSS (e.g., Ollama-compatible) ---
+# [model_providers.ollama]
+# name = "Ollama"
+# base_url = "http://localhost:11434/v1"
+# wire_api = "chat"
+
+################################################################################
+# Profiles (named presets)
+################################################################################
+
+[profiles]
+
+# [profiles.default]
+# model = "gpt-5.2-codex"
+# model_provider = "openai"
+# approval_policy = "on-request"
+# sandbox_mode = "read-only"
+# oss_provider = "ollama"
+# model_reasoning_effort = "medium"
+# model_reasoning_summary = "auto"
+# model_verbosity = "medium"
+# personality = "friendly" # or "pragmatic" or "none"
+# chatgpt_base_url = "https://chatgpt.com/backend-api/"
+# model_catalog_json = "./models.json"
+# experimental_compact_prompt_file = "./compact_prompt.txt"
+# include_apply_patch_tool = false
+# experimental_use_unified_exec_tool = false
+# experimental_use_freeform_apply_patch = false
+# tools.web_search = false             # deprecated legacy alias; prefer top-level `web_search`
+# features = { unified_exec = false }
+
+################################################################################
+# Apps / Connectors
+################################################################################
+
+# Optional per-app controls.
+[apps]
+# [_default] applies to all apps unless overridden per app.
+# [apps._default]
+# enabled = true
+# destructive_enabled = true
+# open_world_enabled = true
+#
+# [apps.google_drive]
+# enabled = false
+# destructive_enabled = false            # block destructive-hint tools for this app
+# default_tools_enabled = true
+# default_tools_approval_mode = "prompt" # auto | prompt | approve
+#
+# [apps.google_drive.tools."files/delete"]
+# enabled = false
+# approval_mode = "approve"
+
+################################################################################
+# Projects (trust levels)
+################################################################################
+
+# Mark specific worktrees as trusted or untrusted.
+[projects]
+# [projects."/absolute/path/to/project"]
+# trust_level = "trusted"  # or "untrusted"
+[projects."/home/kinoko/development/github"]
+trust_level = "trusted"
+
+[projects."/home/kinoko/development/github/sslab"]
+trust_level = "trusted"
+
+[projects."/home/kinoko"]
+trust_level = "untrusted"
+
+[projects."/home/kinoko/development/aur/karukan"]
+trust_level = "trusted"
+
+[projects."/home/kinoko/development/github/vcim"]
+trust_level = "trusted"
+
+[projects."/home/kinoko/development/github/cefore-emu-sslab"]
+trust_level = "trusted"
+
+[projects."/home/kinoko/development/github/koh11235813.github.io"]
+trust_level = "trusted"
+
+[projects."/home/kinoko/development/github/codex"]
+trust_level = "trusted"
+
+[projects."/home/kinoko/development/github/strongswan"]
+trust_level = "trusted"
+
+################################################################################
+# OpenTelemetry (OTEL) - disabled by default
+################################################################################
 
 [otel]
-environment = "dev"
-exporter = "none"
+# Include user prompt text in logs. Default: false
 log_user_prompt = false
+# Environment label applied to telemetry. Default: "dev"
+environment = "dev"
+# Exporter: none (default) | otlp-http | otlp-grpc
+exporter = "none"
+# Trace exporter: none (default) | otlp-http | otlp-grpc
 trace_exporter = "none"
-
-[plugins."browser-use@openai-bundled"]
-enabled = true
-
-[plugins."documents@openai-primary-runtime"]
-enabled = true
 
 [plugins."github@openai-curated"]
 enabled = true
 
-[plugins."presentations@openai-primary-runtime"]
-enabled = true
+# Example OTLP/HTTP exporter configuration
+# [otel.exporter."otlp-http"]
+# endpoint = "https://otel.example.com/v1/logs"
+# protocol = "binary"                         # "binary" | "json"
 
-[plugins."spreadsheets@openai-primary-runtime"]
-enabled = true
+# [otel.exporter."otlp-http".headers]
+# "x-otlp-api-key" = "${OTLP_TOKEN}"
 
-[plugins."claude-md-management@claude-plugins-official"]
-enabled = true
+# Example OTLP/gRPC exporter configuration
+# [otel.exporter."otlp-grpc"]
+# endpoint = "https://otel.example.com:4317",
+# headers = { "x-otlp-meta" = "abc123" }
 
-[plugins."code-review@claude-plugins-official"]
-enabled = true
+# Example OTLP exporter with mutual TLS
+# [otel.exporter."otlp-http"]
+# endpoint = "https://otel.example.com/v1/logs"
+# protocol = "binary"
 
-[plugins."commit-commands@claude-plugins-official"]
-enabled = true
+# [otel.exporter."otlp-http".headers]
+# "x-otlp-api-key" = "${OTLP_TOKEN}"
 
-[plugins."context7@claude-plugins-official"]
-enabled = true
-
-[plugins."discord@claude-plugins-official"]
-enabled = true
-
-[plugins."github@claude-plugins-official"]
-enabled = true
-
-[plugins."skill-creator@claude-plugins-official"]
-enabled = true
-
-[plugins."supabase@claude-plugins-official"]
-enabled = true
-
-[plugins."codex@openai-codex"]
-enabled = true
-
-[plugins."computer-use@openai-bundled"]
-enabled = true
-
-[profiles]
-
-[projects."/Users/kinoko"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/.ssh"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/cfs/iris-data-lab-event-app"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/cefore"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/cefore-emu-koh11235813"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/cefore-emu-sslab"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/codex"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/dotfiles"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/koh11235813.github.io"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/ss-lab-tut.github.io"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/sslab"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Development/github/strongswan"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/Downloads"]
-trust_level = "trusted"
-
-[projects."/Users/kinoko/ix2215"]
-trust_level = "trusted"
-
-[projects."/Volumes/SSD_2TB/assets"]
-trust_level = "trusted"
-
-[sandbox_workspace_write]
-exclude_slash_tmp = false
-exclude_tmpdir_env_var = false
-network_access = false
-writable_roots = []
-
-[shell_environment_policy]
-exclude = []
-experimental_use_profile = false
-ignore_default_excludes = true
-include_only = []
-inherit = "all"
-
-[shell_environment_policy.set]
-CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1"
-
-[tui]
-animations = true
-notifications = false
-show_tooltips = true
-status_line = [
-    "current-dir",
-    "git-branch",
-    "model-with-reasoning",
-    "context-used",
-    "five-hour-limit",
-    "weekly-limit",
-    "used-tokens",
-    "fast-mode",
-]
-
-[tui.model_availability_nux]
-"gpt-5.5" = 4
+# [otel.exporter."otlp-http".tls]
+# ca-certificate = "certs/otel-ca.pem"
+# client-certificate = "/etc/codex/certs/client.pem"
+# client-private-key = "/etc/codex/certs/client-key.pem"
