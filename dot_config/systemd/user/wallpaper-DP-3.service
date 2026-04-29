@@ -3,11 +3,12 @@ Description=mpvpaper for DP-3
 PartOf=wallpaper.target
 
 [Service]
-ExecStart=/usr/bin/mpvpaper DP-3 -o "--hwdec=vaapi-copy --vd-lavc-dr=no --loop-file=inf --no-audio" --auto-pause %h/Videos/wallpaper/cartethyia-wuthering-waves.1920x1080.mp4
-Restart=always
+# ExecStart=/usr/bin/mpvpaper DP-3 -o "--hwdec=auto --vd-lavc-dr=no --loop-file=inf --no-audio --cache=no --demuxer-max-bytes=32M --demuxer-max-back-bytes=16M --demuxer-readahead-secs=1" --auto-stop -vv /home/kinoko/Videos/wallpaper/wuthering-calm-cartethyia.1920x1080.mp4
+ExecStart=/usr/bin/mpvpaper DP-3 -o "--hwdec=auto --vd-lavc-dr=no --loop-file=inf --no-audio --cache=no --demuxer-max-bytes=32M --demuxer-max-back-bytes=16M --demuxer-readahead-secs=1" --auto-stop -vv /home/kinoko/Videos/wallpaper/kokkoro-princess-connect-redive.1920x1080.mp4
+Restart=on-failure
 RestartSec=1
 MemoryMax=1G
-MemoryHigh=800M
+MemoryHigh=500M
 
 [Install]
 WantedBy=wallpaper.target

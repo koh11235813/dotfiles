@@ -9,13 +9,18 @@
 }
 
 window#waybar {
-    background: #1d2021;
-    border: 2px solid #3c3836;
+    background: rgba(12, 14, 20, 0.52);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 14px;
+    box-shadow:
+        0 4px 32px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 
 tooltip {
-    background-color: #1d2021;
-    border: 2px solid #7c6f64;
+    background-color: rgba(12, 14, 20, 0.80);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
 }
 
 #clock,
@@ -24,6 +29,8 @@ tooltip {
 #memory,
 #custom-gpu-usage,
 #battery,
+#power-profiles-daemon,
+#systemd-failed-units,
 #network,
 #pulseaudio,
 #custom-volume-ascii,
@@ -33,9 +40,10 @@ tooltip {
 }
 
 #workspaces {
-    background-color: #303536;
+    background: rgba(255, 255, 255, 0.07);
     margin: 6px 0px 6px 6px;
-    border: 2px solid #434a4c;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
 }
 
 #workspaces button {
@@ -43,70 +51,91 @@ tooltip {
     min-width: 0;
     box-shadow: inset 0 -3px transparent;
     padding: 2px 4px;
-    color: #c7ab7a;
+    color: rgba(199, 171, 122, 0.80);
 }
 
 #workspaces button.focused {
-    color: #ddc7a1;
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(221, 199, 161, 1.0);
+    border-radius: 8px;
 }
 
 #workspaces button.urgent {
-    background-color: #e78a4e;
+    background-color: rgba(231, 138, 78, 0.70);
+    border-radius: 8px;
 }
 
-#clock {
-    background-color: #303536;
-    border: 2px solid #434a4c;
-    color: #d4be98;
+#clock,
+#network {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    color: rgba(212, 190, 152, 0.90);
 }
 
 #tray {
-    background-color: #d4be98;
-    border: 2px solid #c7ab7a;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
 }
 
 #battery {
-    background-color: #a9b665;
-    border: 2px solid #c7ab7a;
-    color: #6c782e;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    color: rgba(169, 182, 101, 0.95);
 }
 
 #cpu,
 #memory,
 #custom-gpu-usage,
-#network,
 #custom-volume-ascii,
+#systemd-failed-units,
 #custom-power-menu {
-    background-color: #ddc7a1;
-    border: 2px solid #c7ab7a;
-    color: #1d2021;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    color: rgba(230, 225, 210, 0.90);
+}
+
+#power-profiles-daemon {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    color: rgba(230, 225, 210, 0.90);
+    font-size: 70%;
+    padding: 2px;
 }
 
 #cpu.critical,
 #memory.critical,
 #custom-gpu-usage.critical {
-    background-color: #ddc7a1;
-    border: 2px solid #c7ab7a;
-    color: #c14a4a;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 100, 100, 0.40);
+    border-radius: 10px;
+    color: rgba(193, 74, 74, 1.0);
 }
 
 #battery.warning,
 #battery.critical,
 #battery.urgent {
-    background-color: #ddc7a1;
-    border: 2px solid #c7ab7a;
-    color: #c14a4a;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 100, 100, 0.40);
+    border-radius: 10px;
+    color: rgba(193, 74, 74, 1.0);
 }
 
 /* 音量バーのカスタム装飾 */
 #custom-volume-ascii.critical {
-    background-color: #ddc7a1;
-    border: 2px solid #c7ab7a;
-    color: #c14a4a;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 100, 100, 0.40);
+    border-radius: 10px;
+    color: rgba(193, 74, 74, 1.0);
 }
 
-#custom-volume-ascii.warning {
-    background-color: #ddc7a1;
-    border: 2px solid #c7ab7a;
-    color: #b86018;
+#custom-volume-ascii.warnig {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 160, 50, 0.40);
+    border-radius: 10px;
+    color: rgba(184, 96, 24, 1.0);
 }
