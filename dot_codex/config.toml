@@ -20,7 +20,7 @@ model = "gpt-5.5"
 personality = "friendly"
 
 # Optional model override for /review. Default: unset (uses current session model).
-# review_model = "gpt-5.2-codex"
+review_model = "gpt-5.3-codex"
 
 # Provider id selected from [model_providers]. Default: "openai".
 model_provider = "openai"
