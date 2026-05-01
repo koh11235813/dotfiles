@@ -226,6 +226,13 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   source "$HOME/.cargo/env"
 fi
 
+# User binary
+
+export PATH="$PATH:$HOME/bin"
+export PATH="$PATH:$HOME/.local/bin"
+export PATH="$PATH:$HOME/.local/share/bin"
+
+
 # LM Studio CLI (lms)
 export PATH="$PATH:$HOME/.lmstudio/bin"
 
