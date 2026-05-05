@@ -82,7 +82,8 @@ augroup trim_trailing_whitespace
   autocmd BufWritePre * %s/\s\+$//e
 augroup END
 
-set clipboard=unnamed,autoselect
+" set clipboard=unnamed,autoselect
+set clipboard=unnamed
 hi Comment ctermfg=3
 
 if has("syntax") && has("eval")

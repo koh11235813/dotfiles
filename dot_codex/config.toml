@@ -85,7 +85,8 @@ include_apply_patch_tool = false
 
 # External notifier program (argv array). When unset: disabled.
 # Example: notify = ["notify-send", "Codex"]
-notify = [ "notify-send", "Codex need reply"]
+# notify = [ "notify-send", "Codex need reply"]
+
 
 
 ################################################################################
@@ -277,10 +278,10 @@ persistence = "save-all"
 [tui]
 # Desktop notifications from the TUI: boolean or filtered list. Default: true
 # Examples: false | ["agent-turn-complete", "approval-requested"]
-notifications = false
+notifications = true
 
 # Notification mechanism for terminal alerts: auto | osc9 | bel. Default: "auto"
-# notification_method = "auto"
+notification_method = "auto"
 
 # Enables welcome/status/spinner animations. Default: true
 animations = true
