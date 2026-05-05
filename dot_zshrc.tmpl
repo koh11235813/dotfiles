@@ -213,6 +213,12 @@ if command -v gem >/dev/null 2>&1; then
   export PATH="$PATH:$GEM_HOME/bin"
 fi
 
+if [[ -d /usr/sbin ]]; then
+   export PATH="$PATH:/usr/sbin"
+elif [[ -d /usr/local/sbin ]]; then
+   export PATH="$PATH:/usr/local/sbin"
+fi
+
 function wttr {
   curl -H "Accept-Language: ${LANG%_*}" "wttr.in/${1:-ichinomiya}"
 }
