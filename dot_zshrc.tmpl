@@ -213,9 +213,12 @@ if command -v gem >/dev/null 2>&1; then
   export PATH="$PATH:$GEM_HOME/bin"
 fi
 
+# sbin
 if [[ -d /usr/sbin ]]; then
    export PATH="$PATH:/usr/sbin"
-elif [[ -d /usr/local/sbin ]]; then
+fi
+
+if [[ -d /usr/local/sbin ]]; then
    export PATH="$PATH:/usr/local/sbin"
 fi
 
