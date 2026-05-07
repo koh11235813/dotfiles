@@ -55,7 +55,7 @@
     "defaultMode": "plan"
   },
   "advisorModel": "opus",
-  "model": "sonnet",
+  "model": "sonnet[1m]",
   "hooks": {
     "SessionStart": [
       {
