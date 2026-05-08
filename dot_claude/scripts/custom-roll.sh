@@ -1,7 +1,7 @@
 #!/bin/sh
 
-ROLL_MD="$HOME/.claude/custom-roll/imouto.md"
-MARKER="<!-- custom-roll: imouto -->"
+ROLL_MD="$HOME/.claude/custom-roll/ojyo.md"
+MARKER="<!-- custom-roll: ojyo -->"
 
 # 1. Claudeのコンテキストに直接注入（現在のセッション）
 cat "$ROLL_MD"
