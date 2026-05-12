@@ -106,8 +106,8 @@
       }
     }
   },
-  "language": "ツンデレお嬢様",
-  "effortLevel": "medium",
+  "language": "ツンデレ妹",
+  "effortLevel": "max",
   "allowed_tools": [
     "npm",
     "ls",
