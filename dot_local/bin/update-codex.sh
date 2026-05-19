@@ -12,8 +12,26 @@ fi
 repo="openai/codex"
 install_path="/usr/local/bin/codex"
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+script_name="${0:t}"
+
+usage() {
+  echo "usage: $script_name [stable|alpha]" >&2
+}
+
+if [ "$#" -gt 1 ]; then
+  usage
+  exit 1
+fi
+
+requested_channel="${1:-}"
+case "$requested_channel" in
+  ""|stable|alpha)
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -26,6 +44,9 @@ need gh
 need tar
 need awk
 need uname
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
 current_version="$(codex --version 2>/dev/null | awk '{print $2}' || true)"
 
@@ -61,38 +82,46 @@ case "$os:$arch" in
     ;;
 esac
 
-# If currently installed version is alpha, track alpha/prerelease.
-# If stable or not installed, default to stable.
-if printf '%s\n' "$current_version" | grep -Eq -- '-alpha\.'; then
-  latest_tag="$(
-    gh release list \
-      --repo "$repo" \
-      --exclude-drafts \
-      --json tagName,isPrerelease,publishedAt \
-      --jq '
-        map(select(.tagName | startswith("rust-v")))
-        | sort_by(.publishedAt)
-        | reverse
-        | .[0].tagName
-      '
-  )"
-  channel="prerelease"
+# If no channel is requested, keep following the currently installed channel.
+if [ -n "$requested_channel" ]; then
+  channel="$requested_channel"
+elif printf '%s\n' "$current_version" | grep -Eq -- '-alpha\.'; then
+  channel="alpha"
 else
-  latest_tag="$(
-    gh release list \
-      --repo "$repo" \
-      --exclude-drafts \
-      --exclude-pre-releases \
-      --json tagName,isPrerelease,publishedAt \
-      --jq '
-        map(select(.tagName | startswith("rust-v")))
-        | sort_by(.publishedAt)
-        | reverse
-        | .[0].tagName
-      '
-  )"
   channel="stable"
 fi
+
+case "$channel" in
+  alpha)
+    latest_tag="$(
+      gh release list \
+        --repo "$repo" \
+        --exclude-drafts \
+        --json tagName,isPrerelease,publishedAt \
+        --jq '
+          map(select((.tagName | startswith("rust-v")) and .isPrerelease == true))
+          | sort_by(.publishedAt)
+          | reverse
+          | .[0].tagName
+        '
+    )"
+    ;;
+  stable)
+    latest_tag="$(
+      gh release list \
+        --repo "$repo" \
+        --exclude-drafts \
+        --exclude-pre-releases \
+        --json tagName,isPrerelease,publishedAt \
+        --jq '
+          map(select(.tagName | startswith("rust-v")))
+          | sort_by(.publishedAt)
+          | reverse
+          | .[0].tagName
+        '
+    )"
+    ;;
+esac
 
 if [ -z "$latest_tag" ] || [ "$latest_tag" = "null" ]; then
   echo "could not find latest Codex release for channel: $channel" >&2
