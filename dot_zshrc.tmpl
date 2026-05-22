@@ -153,11 +153,11 @@ case ${OSTYPE} in
     fi
 
     if [[ -x /usr/bin/dircolors ]]; then
-      if [[ -r ~/.dircolors ]]; then
-        eval "$(dircolors -b ~/.dircolors)"
+        if [[ -r ~/.dircolors ]]; then
+            eval "$(dircolors -b ~/.dircolors)"
       else
-        eval "$(dircolors -b)"
-      fi
+            eval "$(dircolors -b)"
+        fi
     fi
 
     alias ls='ls -F --color=auto'
@@ -166,11 +166,11 @@ case ${OSTYPE} in
     alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history 1 | sed "s/^[ ]*[0-9]\+[ ]*//;s/[;&|]\s*alert$//")"'
 
     if command -v xsel >/dev/null 2>&1; then
-      alias -g C='| xsel --input --clipboard'
+        alias -g C='| xsel --input --clipboard'
     fi
 
     if [[ -f ~/.zsh_aliases ]]; then
-      source ~/.zsh_aliases
+        source ~/.zsh_aliases
     fi
 
     if [[ -d /usr/local/etc/alias.d ]]; then
@@ -212,31 +212,31 @@ export no_proxy="*.local,169.254/16"
 eval "$(direnv hook zsh)"
 
 if command -v gem >/dev/null 2>&1; then
-  export GEM_HOME="$(gem env user_gemhome)"
-  export GEM_PATH="$GEM_HOME:${GEM_PATH:-}"
-  export PATH="$PATH:$GEM_HOME/bin"
+    export GEM_HOME="$(gem env user_gemhome)"
+    export GEM_PATH="$GEM_HOME:${GEM_PATH:-}"
+    export PATH="$PATH:$GEM_HOME/bin"
 fi
 
 # sbin
 if [[ -d /usr/sbin ]]; then
-   export PATH="$PATH:/usr/sbin"
+    export PATH="$PATH:/usr/sbin"
 fi
 
 if [[ -d /usr/local/sbin ]]; then
-   export PATH="$PATH:/usr/local/sbin"
+    export PATH="$PATH:/usr/local/sbin"
 fi
 
 function wttr {
-  curl -H "Accept-Language: ${LANG%_*}" "wttr.in/${1:-ichinomiya}"
+    curl -H "Accept-Language: ${LANG%_*}" "wttr.in/${1:-ichinomiya}"
 }
 
 function delkasu {
-  find "$1" \( -name '.DS_Store' -o -name '._*' -o -name '.apdisk' -o -name 'Thumbs.db' -o -name 'Desktop.ini' \) -delete -print
+    find "$1" \( -name '.DS_Store' -o -name '._*' -o -name '.apdisk' -o -name 'Thumbs.db' -o -name 'Desktop.ini' \) -delete -print
 }
 
 # Rust (cargo)
 if [[ -f "$HOME/.cargo/env" ]]; then
-  source "$HOME/.cargo/env"
+    source "$HOME/.cargo/env"
 fi
 
 # User binary
@@ -245,6 +245,12 @@ export PATH="$HOME/bin:$PATH"
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.local/share/bin:$PATH"
 
+# cuda toolkit
+
+if [[ -f /usr/local/cuda/bin ]]; then
+    export export PATH=/usr/local/cuda/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+fi
 
 # LM Studio CLI (lms)
 export PATH="$PATH:$HOME/.lmstudio/bin"
