@@ -112,7 +112,7 @@ allow_login_shell = true
 # - read-only (default)
 # - workspace-write
 # - danger-full-access (no sandbox; extremely risky)
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 
 ################################################################################
 # Authentication & Login
@@ -416,9 +416,9 @@ args = ["chrome-devtools-mcp@latest"]
 [profiles]
 
 [profiles.default]
-# model = "gpt-5.2-codex"
+# model = "gpt-5.5"
 # model_provider = "openai"
-approval_policy = "on-request"
+# approval_policy = "on-request"
 # sandbox_mode = "read-only"
 # oss_provider = "ollama"
 # model_reasoning_effort = "medium"
@@ -433,20 +433,6 @@ approval_policy = "on-request"
 # experimental_use_freeform_apply_patch = false
 # tools.web_search = false             # deprecated legacy alias; prefer top-level `web_search`
 # features = { unified_exec = false }
-
-[permissions.plan-read.filesystem]
-":minimal" = "read"
-
-[permissions.plan-read.filesystem.":workspace_roots"]
-"." = "read"
-
-[permissions.plan-read.network]
-enabled = false
-
-[profiles.plan]
-default_permissions = "plan-read"
-approval_policy = "on-request"
-plan_mode_reasoning_effort = "high"
 
 ################################################################################
 # Apps / Connectors
