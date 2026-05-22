@@ -45,7 +45,7 @@ model_auto_compact_token_limit = 800000 # tokens; unset uses model defaults
 
 # Reasoning effort: minimal | low | medium | high | xhigh (default: medium; xhigh on gpt-5.2-codex and gpt-5.2)
 model_reasoning_effort = "medium"
-plan_mode_reasoning_effort = "medium"
+plan_mode_reasoning_effort = "high"
 
 # Reasoning summary: auto | concise | detailed | none (default: auto)
 # model_reasoning_summary = "auto"
@@ -112,7 +112,7 @@ allow_login_shell = true
 # - read-only (default)
 # - workspace-write
 # - danger-full-access (no sandbox; extremely risky)
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 
 ################################################################################
 # Authentication & Login
