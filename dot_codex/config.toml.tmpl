@@ -196,7 +196,7 @@ approvals_reviewer = "user"
 ################################################################################
 
 # Active profile name. When unset, no profile is applied.
-# profile = "default"
+profile = "default"
 
 ################################################################################
 # Agents (multi-agent roles and limits)
@@ -415,10 +415,10 @@ args = ["chrome-devtools-mcp@latest"]
 
 [profiles]
 
-# [profiles.default]
+[profiles.default]
 # model = "gpt-5.2-codex"
 # model_provider = "openai"
-# approval_policy = "on-request"
+approval_policy = "on-request"
 # sandbox_mode = "read-only"
 # oss_provider = "ollama"
 # model_reasoning_effort = "medium"
@@ -433,6 +433,20 @@ args = ["chrome-devtools-mcp@latest"]
 # experimental_use_freeform_apply_patch = false
 # tools.web_search = false             # deprecated legacy alias; prefer top-level `web_search`
 # features = { unified_exec = false }
+
+[permissions.plan-read.filesystem]
+":minimal" = "read"
+
+[permissions.plan-read.filesystem.":workspace_roots"]
+"." = "read"
+
+[permissions.plan-read.network]
+enabled = false
+
+[profiles.plan]
+default_permissions = "plan-read"
+approval_policy = "on-request"
+plan_mode_reasoning_effort = "high"
 
 ################################################################################
 # Apps / Connectors
