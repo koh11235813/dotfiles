@@ -89,8 +89,6 @@ include_apply_patch_tool = false
 # Example: notify = ["notify-send", "Codex"]
 # notify = [ "notify-send", "Codex need reply"]
 
-
-
 ################################################################################
 # Approval & Sandbox
 ################################################################################
@@ -202,15 +200,15 @@ profile = "default"
 # Agents (multi-agent roles and limits)
 ################################################################################
 
-# [agents]
-# Maximum concurrently open agent threads. Default: 6
-# max_threads = 6
-# Maximum nested spawn depth. Root session starts at depth 0. Default: 1
-# max_depth = 1
+[agents]
+Maximum concurrently open agent threads. Default: 6
+max_threads = 6
+Maximum nested spawn depth. Root session starts at depth 0. Default: 1
+max_depth = 1
 
-# [agents.reviewer]
-# description = "Find security, correctness, and test risks in code."
-# config_file = "./agents/reviewer.toml"  # relative to the config.toml that defines it
+[agents.reviewer]
+description = "Find security, correctness, and test risks in code."
+config_file = "./agents/reviewer.toml"  # relative to the config.toml that defines it
 
 ################################################################################
 # Skills (per-skill overrides)
@@ -341,7 +339,7 @@ enabled = true
 # unified_exec = false
 # shell_snapshot = false
 # apply_patch_freeform = false
-# multi_agent = false
+multi_agent = true
 # search_tool = false
 # personality = true
 # request_rule = true
@@ -481,6 +479,17 @@ trace_exporter = "none"
 
 [plugins."github@openai-curated"]
 enabled = true
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[marketplaces.openai-bundled]
+last_updated = "2026-05-28T07:39:47Z"
+source_type = "local"
+source = "/Users/kinoko/.codex/.tmp/bundled-marketplaces/openai-bundled"
+
+[desktop.open-in-target-preferences]
+global = "terminal"
 
 # Example OTLP/HTTP exporter configuration
 # [otel.exporter."otlp-http"]
