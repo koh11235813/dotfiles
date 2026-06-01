@@ -109,7 +109,8 @@
     "df",
     "tail",
     "find",
-    "head"
+    "head",
+    "read"
   ],
   "theme": "dark-daltonized",
   "editorMode": "vim",
