@@ -57,17 +57,6 @@
   "advisorModel": "opus",
   "model": "claude-opus-4-8[1m]",
   "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/scripts/custom-roll.sh"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
