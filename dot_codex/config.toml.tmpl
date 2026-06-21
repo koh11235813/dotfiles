@@ -1,3 +1,4 @@
+#:schema https://developers.openai.com/codex/config-schema.json
 # Codex example configuration (config.toml)
 #
 # This file lists all keys Codex reads from config.toml, their default values,
@@ -32,8 +33,8 @@ model_provider = "openai"
 # Uncomment to force values.
 # model_context_window = 258000
 # model_auto_compact_token_limit = 200000
-model_context_window = 1000000      # tokens; default: auto for model
-model_auto_compact_token_limit = 800000 # tokens; unset uses model defaults
+model_context_window = 400000      # tokens; default: auto for model
+model_auto_compact_token_limit = 353000 # tokens; unset uses model defaults
 # tool_output_token_limit = 10000     # tokens stored per tool output; default: 10000 for gpt-5.2-codex
 # model_catalog_json = "/absolute/path/to/models.json" # optional startup-only model catalog override
 # background_terminal_max_timeout = 300000 # ms; max empty write_stdin poll window (default 5m)
