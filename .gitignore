@@ -9,3 +9,6 @@
 dot_config/zed/prompts/prompts-library-db*
 dot_config/zed/conversations/
 dot_config/zed/themes/
+
+# AGENTS.md
+dot_codex/AGENTS.md
