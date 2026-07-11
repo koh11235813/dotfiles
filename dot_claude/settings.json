@@ -68,8 +68,8 @@
     ],
     "defaultMode": "plan"
   },
-  "advisorModel": "opus",
-  "model": "claude-opus-4-8[1m]",
+  "advisorModel": "claude-opus-4-6",
+  "model": "claude-sonnet-5",
   "hooks": {
     "PreToolUse": [
       {
@@ -110,7 +110,7 @@
     }
   },
   "language": "ツンデレ妹",
-  "effortLevel": "max",
+  "effortLevel": "xhigh",
   "allowed_tools": [
     "npm",
     "ls",
