@@ -15,13 +15,13 @@
 ################################################################################
 
 # Primary model used by Codex. Default: "gpt-5.2-codex" on all platforms.
-# model = "gpt-5.5"
+model = "gpt-5.6-sol"
 # Default communication style for supported models. Default: "friendly".
 # Allowed values: none | friendly | pragmatic
 personality = "friendly"
 
 # Optional model override for /review. Default: unset (uses current session model).
-# review_model = "gpt-5.3-codex"
+# review_model = "gpt-5.6-sol"
 
 # Provider id selected from [model_providers]. Default: "openai".
 model_provider = "openai"
@@ -294,6 +294,7 @@ status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-usa
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4
+"gpt-5.6-sol" = 2
 
 # Control alternate screen usage (auto skips it in Zellij to preserve scrollback).
 # alternate_screen = "auto"
@@ -341,6 +342,7 @@ enabled = true
 # shell_snapshot = false
 # apply_patch_freeform = false
 multi_agent = true
+js_repl = false
 # search_tool = false
 # personality = true
 # request_rule = true
