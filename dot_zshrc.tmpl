@@ -124,9 +124,9 @@ case ${OSTYPE} in
 
         if [[ $CPUTYPE == arm64 ]]; then
             export ACLOCAL_PATH="/opt/homebrew/share/aclocal:${ACLOCAL_PATH:-}"
-            export PATH="/opt/homebrew/opt/ruby@3.3/bin:$PATH"
-            export LDFLAGS="-L/opt/homebrew/opt/ruby@3.3/lib"
-            export CPPFLAGS="-I/opt/homebrew/opt/ruby@3.3/include"
+            export PATH="/opt/homebrew/opt/ruby@3.4/bin:$PATH"
+            export LDFLAGS="-L/opt/homebrew/opt/ruby@3.4/lib"
+            export CPPFLAGS="-I/opt/homebrew/opt/ruby@3.4/include"
         elif [[ $CPUTYPE == x86_64 ]]; then
             export ACLOCAL_PATH="/usr/local/opt/aclocal:${ACLOCAL_PATH:-}"
             export LDFLAGS="-L/usr/local/opt/ruby@3.4/lib"
@@ -275,3 +275,7 @@ export PATH=/home/yamakawa/.opencode/bin:$PATH
 if [[ -f "$HOME/.env" ]]; then
   source "$HOME/.env"
 fi
+
+# for claude code
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-5"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-6[1m]"
