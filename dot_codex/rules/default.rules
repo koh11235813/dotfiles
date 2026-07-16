@@ -1,68 +1,207 @@
-prefix_rule(pattern=["rtk", "rg", "--files"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "ls-files"], decision="allow")
-prefix_rule(pattern=["rtk", "which", "trufflehog"], decision="allow")
-prefix_rule(pattern=["rtk", "which", "gitleaks"], decision="allow")
-prefix_rule(pattern=["rtk", "rg", "-n", "--hidden", "-g", "!.git", "-i", "(api[_-]?key|apikey|token|secret|password|passwd|credential|credentials|auth|authorization|bearer|cookie|session|oauth|client[_-]?secret|private[_-]?key|access[_-]?key|refresh[_-]?token|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)"], decision="allow")
-prefix_rule(pattern=["rtk", "rg", "-n", "--hidden", "-g", "!.git", "(-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|ya29\\.[0-9A-Za-z_-]+|[A-Za-z0-9_=-]+\\.[A-Za-z0-9_=-]+\\.[A-Za-z0-9_.+\\/=:-]+)"], decision="allow")
-prefix_rule(pattern=["rtk", "find", ".", "-path", "./.git", "-prune", "-o", "-type", "f", "-size", "+500k", "-print"], decision="allow")
-prefix_rule(pattern=["rtk", "sed", "-n", "1,90p", ".chezmoiignore.tmpl"], decision="allow")
-prefix_rule(pattern=["rtk", "sed", "-n", "500,535p", "dot_codex/config.toml"], decision="allow")
-prefix_rule(pattern=["rtk", "sed", "-n", "340,410p", "dot_codex/config.toml"], decision="allow")
-prefix_rule(pattern=["rtk", "sed", "-n", "110,150p", "dot_codex/config.toml"], decision="allow")
-prefix_rule(pattern=["rtk", "sed", "-n", "1,180p", "dot_claude/settings.local.json"], decision="allow")
-prefix_rule(pattern=["rtk", "rg", "-n", "-uuu", "-g", "!.git", "-i", "(api[_-]?key|apikey|token|secret|password|passwd|credential|credentials|auth|authorization|bearer|cookie|session|oauth|client[_-]?secret|private[_-]?key|access[_-]?key|refresh[_-]?token|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)"], decision="allow")
-prefix_rule(pattern=["rtk", "sed", "-n", "1,120p", ".chezmoi.toml.tmpl"], decision="allow")
-prefix_rule(pattern=["rtk", "rg", "-n", "-uuu", "-g", "!.git", "(-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|ya29\\.[0-9A-Za-z_-]+)"], decision="allow")
-prefix_rule(pattern=["rtk", "sed", "-n", "1,120p", ".gitignore"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "status", "--short", "--ignored"], decision="allow")
-prefix_rule(pattern=["rtk", "strings", "dot_config/zed/prompts/prompts-library-db.0.mdb/data.mdb"], decision="allow")
-prefix_rule(pattern=["rtk", "rg", "-n", "(email|name|sourceDir|autoPush|autoCommit)", ".chezmoi.toml.tmpl"], decision="allow")
-prefix_rule(pattern=["rtk", "strings", "dot_config/zed/prompts/prompts-library-db.0.mdb/lock.mdb"], decision="allow")
-prefix_rule(pattern=["/bin/zsh", "-lc", "rtk git grep -n -I -i -E '(api[_-]?key|apikey|token|secret|password|passwd|credential|credentials|authorization|bearer|oauth|client[_-]?secret|private[_-]?key|access[_-]?key|refresh[_-]?token|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)' $(rtk git rev-list --all) -- ':!.git'"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "log", "--all", "--oneline", "--decorate", "--max-count=20"], decision="allow")
-prefix_rule(pattern=["/bin/zsh", "-lc", "rtk git grep -n -I -E '(-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|ya29\\.[0-9A-Za-z_-]+)' $(rtk git rev-list --all) -- ':!.git'"], decision="allow")
-prefix_rule(pattern=["/bin/zsh", "-lc", "rtk git grep -l -I 'encrypted_content' $(rtk git rev-list --all) --"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "ls-tree", "-r", "--name-only", "ad2de299a0b83119c1ed98b3d7a75d9e5d6890e2"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "ls-tree", "-r", "--name-only", "e34401f5372f2cc838e12df68d07804c2e1635ff"], decision="allow")
-prefix_rule(pattern=["/bin/zsh", "-lc", "rtk git grep -l -I 'h*/default-private-key' $(rtk git rev-list --all) --"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "remote", "-v"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "show", "--stat", "--oneline", "--summary", "--no-renames", "e34401f5372f2cc838e12df68d07804c2e1635ff"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "show", "--stat", "--oneline", "--summary", "--no-renames", "ad2de299a0b83119c1ed98b3d7a75d9e5d6890e2"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "branch", "--all", "--contains", "e34401f5372f2cc838e12df68d07804c2e1635ff"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "branch", "--all", "--contains", "ad2de299a0b83119c1ed98b3d7a75d9e5d6890e2"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "ls-tree", "-r", "--name-only", "HEAD"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "log", "--all", "--oneline", "--decorate", "--grep=WIP on main\\|index on main"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "show-ref"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "rev-list", "--all", "--parents"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "stash", "list"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "stash", "show", "--name-only", "stash@{0}"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "status", "--short", "--branch"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "rev-parse", "refs/stash", "refs/stash^1", "refs/stash^2"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "ls-tree", "-r", "--name-only", "refs/stash"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "show", "--name-only", "--format=%H %s", "--no-renames", "refs/stash", "--"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "stash", "drop", "stash@{0}"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "rev-list", "--all", "--objects"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "fsck", "--unreachable", "--no-reflogs"], decision="allow")
-prefix_rule(pattern=["rtk", "git", "reflog", "expire", "--expire=now", "--all"], decision="allow")
-prefix_rule(pattern=["command", "-v", "rtk"], decision="allow")
-prefix_rule(pattern=["rtk", "proxy", "uv", "run", "pytest"], decision="allow")
-prefix_rule(pattern=["git", "push", ["-f", "--force", "--force-with-lease", "--force-if-includes"]], decision="forbidden")
-prefix_rule(pattern=["git", ["status", "diff", "log", "show"]], decision="allow")
-prefix_rule(pattern=["rtk git", "push", ["-f", "--force", "--force-with-lease", "--force-if-includes"]], decision="forbidden")
-prefix_rule(pattern=["rtk git", ["status", "diff", "log", "show"]], decision="allow")
-prefix_rule(pattern = ["rg"], decision = "allow")
-prefix_rule(pattern = ["find"], decision = "allow")
-prefix_rule(pattern = ["ls"], decision = "allow")
-prefix_rule(pattern = ["pwd"], decision = "allow")
-prefix_rule(pattern = ["tree"], decision = "allow")
-prefix_rule(pattern = ["wc"], decision = "allow")
-prefix_rule(pattern = ["grep"], decision = "allow")
-prefix_rule(pattern = ["sed", "-n"], decision = "allow")
-prefix_rule(pattern = ["rtk rg"], decision = "allow")
-prefix_rule(pattern = ["rtk find"], decision = "allow")
-prefix_rule(pattern = ["rtk ls"], decision = "allow")
-prefix_rule(pattern = ["rtk pwd"], decision = "allow")
-prefix_rule(pattern = ["rtk tree"], decision = "allow")
-prefix_rule(pattern = ["rtk wc"], decision = "allow")
-prefix_rule(pattern = ["rtk grep"], decision = "allow")
-prefix_rule(pattern = ["rtk sed", "-n"], decision = "allow")
+# Keep this file limited to durable command policy. One-off approvals written by
+# the TUI should be reviewed instead of being promoted automatically.
+
+# RTK bootstrap and read-only inspection tools.
+prefix_rule(
+    pattern = ["command", "-v", "rtk"],
+    decision = "allow",
+    justification = "Locate the required RTK command without prompting.",
+    match = ["command -v rtk"],
+    not_match = ["command -v git"],
+)
+
+prefix_rule(
+    pattern = ["rtk", ["rg", "grep", "ls", "pwd", "tree", "wc", "which"]],
+    decision = "allow",
+    justification = "Allow RTK-wrapped read-only workspace inspection commands.",
+    match = [
+        "rtk rg --files",
+        "rtk ls -la",
+        "rtk which gitleaks",
+    ],
+    not_match = [
+        "rtk find . -type f",
+        "rtk sed -n 1,80p README.md",
+    ],
+)
+
+# Git commands that inspect repository state without intentionally changing it.
+prefix_rule(
+    pattern = [
+        "rtk",
+        "git",
+        [
+            "status",
+            "diff",
+            "log",
+            "show",
+            "ls-files",
+            "show-ref",
+            "rev-list",
+            "rev-parse",
+            "ls-tree",
+            "grep",
+        ],
+    ],
+    decision = "allow",
+    justification = "Allow RTK-wrapped Git inspection and diagnostics.",
+    match = [
+        "rtk git status --short --branch",
+        "rtk git diff --stat",
+        "rtk git rev-list --all --objects",
+    ],
+    not_match = [
+        "rtk git commit -m change",
+        "git status --short",
+    ],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", "stash", ["list", "show"]],
+    decision = "allow",
+    justification = "Inspect stashes without changing or deleting them.",
+    match = [
+        "rtk git stash list",
+        "rtk git stash show --stat stash@{0}",
+    ],
+    not_match = ["rtk git stash drop stash@{0}"],
+)
+
+# Require confirmation for deletion and Git operations that can discard work.
+prefix_rule(
+    pattern = ["rm"],
+    decision = "prompt",
+    justification = "Confirm file deletion before running rm outside the sandbox.",
+    match = ["rm -rf build"],
+    not_match = ["rtk rm -rf build"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "rm"],
+    decision = "prompt",
+    justification = "Confirm file deletion before running RTK-wrapped rm outside the sandbox.",
+    match = ["rtk rm -rf build"],
+    not_match = ["rm -rf build"],
+)
+
+prefix_rule(
+    pattern = ["git", ["reset", "clean", "restore", "prune", "gc"]],
+    decision = "prompt",
+    justification = "Confirm Git operations that can discard work or unreachable history.",
+    match = [
+        "git reset --hard HEAD~1",
+        "git clean -fd",
+        "git restore README.md",
+    ],
+    not_match = ["git status --short"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", ["reset", "clean", "restore", "prune", "gc"]],
+    decision = "prompt",
+    justification = "Confirm RTK-wrapped Git operations that can discard work or unreachable history.",
+    match = [
+        "rtk git reset --hard HEAD~1",
+        "rtk git clean -fd",
+        "rtk git restore README.md",
+    ],
+    not_match = ["rtk git status --short"],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["-d", "-D", "--delete"]],
+    decision = "prompt",
+    justification = "Confirm branch deletion before removing a local branch.",
+    match = ["git branch -D obsolete"],
+    not_match = ["git branch --list"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", "branch", ["-d", "-D", "--delete"]],
+    decision = "prompt",
+    justification = "Confirm RTK-wrapped branch deletion before removing a local branch.",
+    match = ["rtk git branch -D obsolete"],
+    not_match = ["rtk git branch --list"],
+)
+
+prefix_rule(
+    pattern = ["git", "stash", ["pop", "drop", "clear"]],
+    decision = "prompt",
+    justification = "Confirm operations that remove entries from the stash.",
+    match = ["git stash drop stash@{0}"],
+    not_match = ["git stash list"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", "stash", ["pop", "drop", "clear"]],
+    decision = "prompt",
+    justification = "Confirm RTK-wrapped operations that remove entries from the stash.",
+    match = ["rtk git stash drop stash@{0}"],
+    not_match = ["rtk git stash list"],
+)
+
+prefix_rule(
+    pattern = ["git", "reflog", ["expire", "delete"]],
+    decision = "prompt",
+    justification = "Confirm deletion of reflog history.",
+    match = ["git reflog expire --expire=now --all"],
+    not_match = ["git reflog show"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", "reflog", ["expire", "delete"]],
+    decision = "prompt",
+    justification = "Confirm RTK-wrapped deletion of reflog history.",
+    match = ["rtk git reflog expire --expire=now --all"],
+    not_match = ["rtk git reflog show"],
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", "--"],
+    decision = "prompt",
+    justification = "Confirm the common checkout form that discards working-tree changes.",
+    match = ["git checkout -- README.md"],
+    not_match = ["git checkout feature-branch"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", "checkout", "--"],
+    decision = "prompt",
+    justification = "Confirm the RTK-wrapped checkout form that discards working-tree changes.",
+    match = ["rtk git checkout -- README.md"],
+    not_match = ["rtk git checkout feature-branch"],
+)
+
+# Prefix rules cannot detect force flags in arbitrary later argument positions.
+# These rules block the representative flag-first forms; AGENTS.md policy covers
+# reordered flags and force-prefixed refspecs.
+prefix_rule(
+    pattern = [
+        "git",
+        "push",
+        ["-f", "--force", "--force-with-lease", "--force-if-includes", "--mirror"],
+    ],
+    decision = "forbidden",
+    justification = "Force pushing is prohibited; use a normal push or ask the user to perform it manually.",
+    match = ["git push --force origin main"],
+    not_match = [
+        "git push origin main",
+        "git push origin main --force",
+    ],
+)
+
+prefix_rule(
+    pattern = [
+        "rtk",
+        "git",
+        "push",
+        ["-f", "--force", "--force-with-lease", "--force-if-includes", "--mirror"],
+    ],
+    decision = "forbidden",
+    justification = "RTK-wrapped force pushing is prohibited; use a normal push or ask the user to perform it manually.",
+    match = ["rtk git push --force origin main"],
+    not_match = [
+        "rtk git push origin main",
+        "rtk git push origin main --force",
+    ],
+)
