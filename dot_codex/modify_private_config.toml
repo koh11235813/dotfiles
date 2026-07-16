@@ -1,0 +1,259 @@
+{{- /* chezmoi:modify-template */ -}}
+#:schema https://developers.openai.com/codex/config-schema.json
+# Codex user configuration.
+# Based on the official sample/reference; active choices include short Japanese reasons.
+# Root keys must appear before TOML tables.
+
+################################################################################
+# Model and response behavior
+################################################################################
+
+# Primary model. 高品質なコーディング作業を優先する。
+model = "gpt-5.6-sol"
+personality = "friendly"
+# /review follows the current session model unless explicitly overridden.
+# review_model = "gpt-5.6-sol"
+model_provider = "openai"
+# Let Codex use model metadata so context limits track model updates.
+# model_context_window = 400000
+# model_auto_compact_token_limit = 353000
+
+model_reasoning_effort = "medium"
+plan_mode_reasoning_effort = "high"
+model_verbosity = "medium"
+# model_reasoning_summary = "auto" # auto | concise | detailed | none
+# model_supports_reasoning_summaries = true
+
+# Optional instruction overrides. Prefer AGENTS.md for durable project guidance.
+# developer_instructions = ""
+# compact_prompt = ""
+# model_instructions_file = "/path/to/instructions.txt"
+# experimental_compact_prompt_file = "/path/to/compact-prompt.txt"
+
+################################################################################
+# Approvals, sandbox, authentication, and project discovery
+################################################################################
+
+# Interactive work: the agent requests approval only when necessary.
+approval_policy = "on-request"
+approvals_reviewer = "user"
+# Avoid hidden profile startup effects and the experimental zsh-fork path.
+allow_login_shell = false
+# Allow workspace edits while keeping network and extra roots closed.
+sandbox_mode = "workspace-write"
+
+# Store credentials in macOS Keychain where supported.
+cli_auth_credentials_store = "keyring"
+mcp_oauth_credentials_store = "auto"
+# chatgpt_base_url = "https://chatgpt.com/backend-api/"
+# forced_chatgpt_workspace_id = ""
+# forced_login_method = "chatgpt" # chatgpt | api
+# mcp_oauth_callback_port = 4321
+# mcp_oauth_callback_url = "https://example.test/callback"
+
+project_doc_max_bytes = 32768
+project_doc_fallback_filenames = ["CLAUDE.md"]
+# project_root_markers = [".git"]
+
+################################################################################
+# History, editor, search, and CLI UI
+################################################################################
+
+file_opener = "vscode"
+web_search = "cached" # cached balances freshness with reproducibility.
+
+# External notify is intentionally unset; TUI notifications are used instead.
+# notify = ["notify-send", "Codex"]
+
+# Optional display/runtime switches; defaults are usually best.
+# hide_agent_reasoning = false
+# show_raw_agent_reasoning = false
+# disable_paste_burst = false
+# check_for_update_on_startup = true
+# background_terminal_max_timeout = 300000
+# log_dir = "/path/to/codex-logs"
+
+################################################################################
+# Agent roles and concurrency
+################################################################################
+
+[agents]
+max_threads = 6
+max_depth = 1
+
+################################################################################
+# Sandbox and process environment
+################################################################################
+
+[sandbox_workspace_write]
+writable_roots = []
+network_access = false
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+
+[shell_environment_policy]
+# Keep ordinary shell context but retain Codex's default secret-name filtering.
+inherit = "core"
+ignore_default_excludes = false
+exclude = []
+set = {}
+include_only = []
+
+[history]
+persistence = "save-all"
+max_bytes = 10485760
+
+################################################################################
+# TUI, feedback, and telemetry
+################################################################################
+
+[tui]
+notifications = true
+notification_method = "auto"
+animations = true
+show_tooltips = true
+theme = "catppuccin-mocha"
+status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-usage", "five-hour-limit", "weekly-limit", "context-window-size", "fast-mode"]
+# alternate_screen = "auto"
+
+[feedback]
+enabled = true
+
+[notice]
+# Codex may add migration and onboarding state below the local-state marker.
+
+[otel]
+log_user_prompt = false
+environment = "dev"
+exporter = "none"
+trace_exporter = "none"
+
+################################################################################
+# Features
+################################################################################
+
+# Keep other feature flags on their release defaults. In particular, do not pin
+# removed js_repl or opt into zsh-fork/network-proxy experiments here.
+# prevent_idle_sleep = false
+# shell_zsh_fork = false
+# unified_exec_zsh_fork = false
+
+[features.code_mode]
+# Opt into programmatic tool orchestration; this is still under development.
+enabled = true
+# excluded_tool_namespaces = []
+# direct_only_tool_namespaces = []
+
+################################################################################
+# Apps and connectors
+################################################################################
+
+[apps._default]
+enabled = true
+destructive_enabled = true
+open_world_enabled = true
+# Auto-run reads; ask before tools that write.
+default_tools_approval_mode = "writes"
+
+################################################################################
+# MCP servers
+################################################################################
+
+[mcp_servers.context7]
+# Remote HTTP avoids npx startup cost and expands the API key from the environment.
+enabled = true
+url = "https://mcp.context7.com/mcp"
+env_http_headers = { "CONTEXT7_API_KEY" = "CONTEXT7_API_KEY" }
+default_tools_approval_mode = "auto"
+
+# [mcp_servers.cfs-agent]
+# enabled = true
+# url = "https://cfs-agent-agent.cfs-dev.workers.dev/mcp"
+# default_tools_approval_mode = "prompt"
+
+# Stdio example:
+# [mcp_servers.example]
+# command = "example-mcp"
+# args = []
+# startup_timeout_sec = 10
+# tool_timeout_sec = 60
+# enabled_tools = []
+# disabled_tools = []
+
+################################################################################
+# Model providers (examples)
+################################################################################
+
+[model_providers]
+
+# [model_providers.openaidr]
+# name = "OpenAI Data Residency"
+# base_url = "https://us.api.openai.com/v1"
+# wire_api = "responses"
+# requires_openai_auth = true
+# request_max_retries = 4
+# stream_max_retries = 5
+# stream_idle_timeout_ms = 300000
+# env_http_headers = { "OpenAI-Organization" = "OPENAI_ORGANIZATION" }
+
+# [model_providers.azure]
+# name = "Azure"
+# base_url = "https://YOUR_PROJECT_NAME.openai.azure.com/openai"
+# wire_api = "responses"
+# query_params = { api-version = "2025-04-01-preview" }
+# env_key = "AZURE_OPENAI_API_KEY"
+
+# [model_providers.ollama]
+# name = "Ollama"
+# base_url = "http://localhost:11434/v1"
+# wire_api = "chat"
+
+################################################################################
+# Skills and plugins
+################################################################################
+
+# [skills.config]
+# path = "/path/to/skill"
+# enabled = false
+
+[plugins."github@openai-curated"]
+enabled = true
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[plugins."computer-use@openai-bundled"]
+enabled = true
+
+[plugins."sites@openai-bundled"]
+enabled = true
+
+[plugins."visualize@openai-bundled"]
+enabled = true
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."pdf@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."template-creator@openai-primary-runtime"]
+enabled = true
+
+################################################################################
+# Machine-local state
+################################################################################
+
+# Codex and the desktop app may append project trust, generated MCP servers,
+# marketplace cache paths, UI state, hook hashes, and onboarding notices here.
+# Chezmoi preserves this suffix and never commits it.
+# >>> codex-local-state >>>
+{{ if contains "# >>> codex-local-state >>>" .chezmoi.stdin -}}
+{{ regexReplaceAll "(?s)^.*?# >>> codex-local-state >>>\\r?\\n?" .chezmoi.stdin "" }}
+{{- end -}}
