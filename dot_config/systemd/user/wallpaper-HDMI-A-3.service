@@ -3,7 +3,7 @@ Description=mpvpaper for DP-2
 PartOf=wallpaper.target
 
 [Service]
-ExecStart=/usr/bin/mpvpaper HDMI-A-3 -o "--hwdec=auto --vd-lavc-dr=no --loop-file=inf --no-audio --cache=no --demuxer-max-bytes=32M --demuxer-max-back-bytes=16M --demuxer-readahead-secs=1" --auto-stop -vv /home/kinoko/Videos/wallpaper/phrolova-umbra-blossom.1920x1080.mp4
+ExecStart=/usr/bin/mpvpaper HDMI-A-3 -o "--hwdec=auto --vd-lavc-dr=no --loop-file=inf --no-audio --cache=no --demuxer-max-bytes=32M --demuxer-max-back-bytes=16M --demuxer-readahead-secs=1" --auto-stop -vv "~/Videos/wallpaper/phrolova-umbra-blossom.1920x1080.mp4"
 Restart=on-failure
 RestartSec=1
 MemoryMax=1G
