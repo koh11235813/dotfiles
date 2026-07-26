@@ -38,50 +38,16 @@
       "Bash(read:*)",
       "Bash(awk *)",
       "Bash(pacman -Q:*)",
-      "Bash(apt search *)",
-      "Bash(rtk tree:*)",
-      "Bash(rtk ls:*)",
-      "Bash(rtk pwd:*)",
-      "Bash(rtk wc:*)",
-      "Bash(rtk python3 -m py_compile:*)",
-      "Bash(rtk python3:*)",
-      "Bash(rtk git ls-tree:*)",
-      "Bash(rtk git pull:*)",
-      "Bash(rtk git push:*)",
-      "Bash(rtk git status:*)",
-      "Bash(rtk git log:*)",
-      "Bash(rtk git show:*)",
-      "Bash(rtk grep:*)",
-      "Bash(rtk xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
-      "Bash(rtk xargs:*)",
-      "Bash(rtk rg:*)",
-      "Bash(rtk uv sync:*)",
-      "Bash(rtk uv run:*)",
-      "Bash(rtk pytest *)",
-      "Bash(rtk read:*)",
-      "Bash(rtk awk *)",
-      "Bash(rtk pacman -Q:*)",
-      "Bash(rtk apt search *)"
+      "Bash(apt search *)"
     ],
     "ask": [
       "Bash(pacman -S:*)"
     ],
     "defaultMode": "plan"
   },
-  "advisorModel": "claude-opus-4-6",
-  "model": "claude-opus-4-6[1m]",
+  "advisorModel": "claude-opus-5[1m]",
+  "model": "claude-opus-5[1m]",
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/rtk-rewrite.sh"
-          }
-        ]
-      }
-    ]
   },
   "statusLine": {
     "type": "command",
@@ -110,7 +76,7 @@
     }
   },
   "language": "ツンデレ妹",
-  "effortLevel": "xhigh",
+  "effortLevel": "medium",
   "allowed_tools": [
     "npm",
     "ls",

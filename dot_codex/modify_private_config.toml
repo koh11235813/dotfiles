@@ -43,7 +43,8 @@ allow_login_shell = false
 sandbox_mode = "workspace-write"
 
 # Store credentials in macOS Keychain where supported.
-cli_auth_credentials_store = "keyring"
+# keyring | file | auto
+cli_auth_credentials_store = "auto"
 mcp_oauth_credentials_store = "auto"
 # chatgpt_base_url = "https://chatgpt.com/backend-api/"
 # forced_chatgpt_workspace_id = ""
