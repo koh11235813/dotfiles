@@ -22,7 +22,8 @@ model_reasoning_effort = "medium"
 plan_mode_reasoning_effort = "high"
 model_verbosity = "medium"
 # model_reasoning_summary = "auto" # auto | concise | detailed | none
-# model_supports_reasoning_summaries = true
+# NOTE: model_supports_reasoning_summaries は 0.147 系で削除済み (#32206)。
+# reasoning パラメータは常に送信されるようになったため、トグルは存在しない。
 
 # Optional instruction overrides. Prefer AGENTS.md for durable project guidance.
 # developer_instructions = ""
@@ -56,6 +57,17 @@ project_doc_max_bytes = 32768
 project_doc_fallback_filenames = ["CLAUDE.md"]
 # project_root_markers = [".git"]
 
+# 単一のツール/関数出力が context を食い潰すのを防ぐ上限。
+# subagent 複数本 + MCP 複数台の構成では実効的なガードになる。
+tool_output_token_limit = 32768
+
+# code_mode は Stage::UnderDevelopment のため、毎セッション
+# "Under-development features enabled: ..." 警告が出る
+# (features/src/lib.rs:1462-1508)。code_mode は意図的に常用するので抑止する。
+# 代償: 新しい unstable feature を誤って有効化しても気づけなくなる。
+# config を更新したら [features] を明示的に見直すこと。
+suppress_unstable_features_warning = true
+
 ################################################################################
 # History, editor, search, and CLI UI
 ################################################################################
@@ -79,8 +91,38 @@ web_search = "cached" # cached balances freshness with reproducibility.
 ################################################################################
 
 [agents]
-max_threads = 6
+# 注意: このテーブルは roles を #[serde(default, flatten)] で持つ
+# (config/src/config_toml.rs:711-713)。直下のキーのタイポは「role 名」として
+# 解釈され、[agents] ブロック全体のロードが壊れる。deny_unknown_fields は
+# schemars 用でランタイムには効かない。キー追加前に必ずソースを確認する。
+# なお壊れた role ファイルは `codex doctor --json` が
+# "Ignoring malformed agent role definition" として報告してくれる (実測済み)。
+
+# `max_threads` は serde alias。正式名で書く (config_toml.rs:689)。
+# gpt-5.6-sol は model catalog 由来で V2 バックエンドになるため、この値は
+# V2 の max_concurrent_threads_per_session に +1 されて渡り (mod.rs:2676-2685)、
+# 実効的な subagent スロットは 6 / 全 7 スロット (root 含む) になる。
+# 探索用途なら 6 本使い切れるが、共有 worktree で書き込み worker を 6 本走らせると
+# 競合が先にボトルネックになる。書き込み系は 2-3 本に留めて使う。
+max_concurrent_threads_per_session = 6
+
+# 1 = 子は孫を spawn できない。V1 バックエンドのみ有効で V2 では無視される。
+# V1 モデル (gpt-5.6-luna 等) に切り替えたときのために残す。
 max_depth = 1
+
+# spawn 時に指定が無く、role 側も指定していない場合の fallback。
+# V1/V2 共通経路で参照される (tools/handlers/multi_agents_common.rs:264-266)。
+# role が model_reasoning_effort を明示していれば role が勝つ:
+# preserve_current_reasoning_effort = role_layer.get("model_reasoning_effort").is_none()
+# (agent/role.rs:177-178)。よって explorer の high はここに負けない。
+default_subagent_reasoning_effort = "medium"
+
+# default_subagent_model は意図的に未設定 (親モデル継承のほうが望ましく、
+# モデル更新時に取り残されるリスクを避ける)。
+# job_max_runtime_seconds は documented no-op なので設定しない。
+
+# ---- inline role 宣言は `[agents.<name>]`。`[agents.roles.<name>]` は存在しない。
+# ---- ここでは agents/*.toml の auto-discovery に任せるため inline 宣言は使わない。
 
 ################################################################################
 # Sandbox and process environment
@@ -96,9 +138,9 @@ exclude_slash_tmp = false
 # Keep ordinary shell context but retain Codex's default secret-name filtering.
 inherit = "core"
 ignore_default_excludes = false
-exclude = []
 set = {}
-include_only = []
+# exclude / include_only は legacy な正規表現リスト。正式形は
+# [shell_environment_policy.filters] テーブル (#34590)。空配列は無意味なので削除。
 
 [history]
 persistence = "save-all"
@@ -117,6 +159,18 @@ theme = "catppuccin-mocha"
 status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-usage", "five-hour-limit", "weekly-limit", "context-window-size", "fast-mode"]
 # alternate_screen = "auto"
 
+# composer を Vim の Normal モードで開始する (config/src/types.rs:706-709)。
+# 実装は tui/src/bottom_pane/textarea/vim.rs。[profiles.*.tui] では設定不可。
+# 注意: 誤ったモード遷移が入力事故に直結するとの指摘あり。合わないと感じたら
+# この行を false にするか、下の ctrl-alt-v / スラッシュコマンド /vim で都度トグルする。
+vim_mode_default = true
+
+[tui.keymap.global]
+# toggle_vim_mode はデフォルトのキー割り当てを持たない
+# (tui/src/keymap.rs:937 が空の default_bindings![])。可逆にするため明示的に割り当てる。
+# 書式は修飾子を ctrl-alt-shift-<key> の順に並べる (config/src/tui_keymap.rs:430)。
+toggle_vim_mode = "ctrl-alt-v"
+
 [feedback]
 enabled = true
 
@@ -134,7 +188,28 @@ trace_exporter = "none"
 ################################################################################
 
 # Keep other feature flags on their release defaults. In particular, do not pin
-# removed js_repl or opt into zsh-fork/network-proxy experiments here.
+# removed flags or opt into zsh-fork/network-proxy experiments here.
+#
+# 設定してはいけないもの:
+#   js_repl      — Stage::Removed。apply_map が無条件 drop する
+#                  (features/src/lib.rs:485-487) ので設定しても意味がない。
+#   multi_agent  — Stage::Stable / default_enabled: true
+#                  (features/src/lib.rs:1084)。デフォルトの言い直しで no-op。
+#                  V1 バックエンドは設定なしで有効。
+#
+# multi_agent_v2 も設定不要: models_cache.json の gpt-5.6-sol は
+# multi_agent_version = "v2" を持つため、multi_agent_version_for_model() の
+# .or(model_version) 経路 (mod.rs:1541-1548) でローカルフラグに関係なく V2 になる。
+# V2 のツールは close_agent/resume_agent/send_input を持たず、代わりに
+# send_message/followup_task/interrupt_agent を持つ。
+# non_code_mode_only (default true) は V2 を抑止するのではなく
+# ToolExposure::DirectModelOnly にするだけ (spec_plan.rs:829-833) —
+# code_mode の tools.*() 名前空間には入らず、モデルに直接露出する。
+#
+# 上の suppress_unstable_features_warning = true が under-development 警告を
+# 消すため、新しい unstable feature を誤って有効化しても気づけない。
+# config を更新したら features を明示的に監査すること。
+#
 # prevent_idle_sleep = false
 # shell_zsh_fork = false
 # unified_exec_zsh_fork = false
