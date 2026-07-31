@@ -169,7 +169,7 @@ vim_mode_default = true
 # toggle_vim_mode はデフォルトのキー割り当てを持たない
 # (tui/src/keymap.rs:937 が空の default_bindings![])。可逆にするため明示的に割り当てる。
 # 書式は修飾子を ctrl-alt-shift-<key> の順に並べる (config/src/tui_keymap.rs:430)。
-toggle_vim_mode = "ctrl-alt-v"
+# toggle_vim_mode = "ctrl-alt-shift-v"
 
 [feedback]
 enabled = true
