@@ -57,6 +57,17 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+        {
+            "matcher": "startup",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "$HOME/.claude/scripts/custom-roll.sh"
+                }
+            ]
+        }
     ]
   },
   "statusLine": {
