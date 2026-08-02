@@ -1,6 +1,7 @@
 name = "researcher"
 description = "Read-only external researcher. Use when the answer lives outside this repo — library and API behavior, version differences, upstream changelogs, standards. Give it the specific question and which version or release you care about; it returns findings with sources, and says so when the sources disagree or do not answer."
-model_reasoning_effort = "medium"
+model = "gpt-5.6-luna"
+model_reasoning_effort = "max"
 sandbox_mode = "read-only"
 approval_policy = "never"
 web_search = "cached"

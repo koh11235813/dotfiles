@@ -82,7 +82,10 @@ web_search = "cached" # cached balances freshness with reproducibility.
 # hide_agent_reasoning = false
 # show_raw_agent_reasoning = false
 # disable_paste_burst = false
-# check_for_update_on_startup = true
+# codex は /usr/local を Homebrew prefix と誤認し `brew upgrade --cask codex` を
+# 提案する。従うと /opt/homebrew/bin/codex が PATH で先行し (dot_zshrc.tmpl:118)、
+# update-codex.sh で入れた版を隠す。更新は update-codex.sh の手動運用。
+check_for_update_on_startup = false
 # background_terminal_max_timeout = 300000
 # log_dir = "/path/to/codex-logs"
 
@@ -239,13 +242,8 @@ default_tools_approval_mode = "writes"
 # Remote HTTP avoids npx startup cost and expands the API key from the environment.
 enabled = true
 url = "https://mcp.context7.com/mcp"
-env_http_headers = { "CONTEXT7_API_KEY" = "CONTEXT7_API_KEY" }
+http_headers = { "Authorization" = "Bearer CONTEXT7_API_KEY" }
 default_tools_approval_mode = "auto"
-
-# [mcp_servers.cfs-agent]
-# enabled = true
-# url = "https://cfs-agent-agent.cfs-dev.workers.dev/mcp"
-# default_tools_approval_mode = "prompt"
 
 # Stdio example:
 # [mcp_servers.example]
