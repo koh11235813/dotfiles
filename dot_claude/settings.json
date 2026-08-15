@@ -111,6 +111,7 @@
     "context7@claude-plugins-official": true,
     "clangd-lsp@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
+    "exa@claude-plugins-official": true,
     "agmsg@fujibee-agmsg": true
   },
   "extraKnownMarketplaces": {
@@ -125,8 +126,11 @@
   "effortLevel": "medium",
   "advisorModel": "claude-opus-5[1m]",
   "theme": "dark-daltonized",
+  "promptSuggestionEnabled": false,
+  "awaySummaryEnabled": false,
   "editorMode": "vim",
   "verbose": true,
+  "remoteControlAtStartup": true,
   "allowed_tools": [
     "npm",
     "ls",
