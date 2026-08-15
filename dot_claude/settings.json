@@ -45,8 +45,7 @@
     ],
     "defaultMode": "plan"
   },
-  "advisorModel": "claude-opus-5[1m]",
-  "model": "claude-opus-5[1m]",
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -59,15 +58,40 @@
       }
     ],
     "SessionStart": [
-        {
-            "matcher": "startup",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "$HOME/.claude/scripts/custom-roll.sh"
-                }
-            ]
-        }
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/scripts/custom-roll.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/ng-check.py",
+            "timeout": 10,
+            "statusMessage": "NG表現チェック中..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/ng-check.py",
+            "timeout": 10,
+            "statusMessage": "NG表現チェック中..."
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
@@ -99,6 +123,10 @@
   },
   "language": "ツンデレ妹",
   "effortLevel": "medium",
+  "advisorModel": "claude-opus-5[1m]",
+  "theme": "dark-daltonized",
+  "editorMode": "vim",
+  "verbose": true,
   "allowed_tools": [
     "npm",
     "ls",
@@ -114,7 +142,5 @@
     "head",
     "read"
   ],
-  "theme": "dark-daltonized",
-  "editorMode": "vim",
-  "verbose": true
+  "awaySummaryEnabled": false
 }
