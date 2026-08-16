@@ -33,6 +33,11 @@ SCAN_CAP = 200_000
 TARGET_EXTENSIONS = {".tex", ".md", ".txt"}
 MAX_REPORTED = 20
 
+# インラインコード。パターン自体を引用して議論する文章 (この hook の設計を
+# 説明する文書など) が自分のパターンに当たって block されるのを防ぐ。
+# 改行をまたがないので、バッククォートの対応がずれても被害が1行に収まる。
+INLINE_CODE = re.compile(r"`[^`\n]*`")
+
 
 def load_patterns():
     """TSV (正規表現<TAB>カテゴリ<TAB>理由) を読む。壊れた行は黙って捨てる。"""
@@ -54,14 +59,31 @@ def load_patterns():
     return patterns
 
 
+def mask_code(text):
+    """インラインコードを NUL で潰す。長さを変えないので元の位置がずれない。
+
+    フェンス (``` ブロック) は扱わない。全 transcript で測ると、除外しても
+    em ダッシュが doc 106件 / chat 169件減るだけで他のパターンは1件も動かず、
+    その中身はコードブロック内の行だった。得るものに対して、フェンスの
+    対応付けは壊れたときの被害が大きすぎる (正規表現でペアリングした実装では
+    チャット履歴の 54% が「コード」と誤判定された)。
+    """
+    return INLINE_CODE.sub(lambda m: "\x00" * (m.end() - m.start()), text)
+
+
 def scan(patterns, text):
-    """パターンごとに最初のマッチ + 件数を返す。"""
+    """パターンごとに最初のマッチ + 件数を返す。
+
+    判定はコードを潰した側で行い、snippet は元テキストから切る (潰した文字を
+    見せても読み手が何を直せばいいか分からないため)。
+    """
+    masked = mask_code(text)
     findings = []
     for rx, raw, category, reason in patterns:
-        matches = rx.findall(text)
+        matches = rx.findall(masked)
         if not matches:
             continue
-        m = rx.search(text)
+        m = rx.search(masked)
         start = max(0, m.start() - 15)
         snippet = text[start:m.end() + 15].replace("\n", " ")
         findings.append({"pattern": raw, "category": category,
