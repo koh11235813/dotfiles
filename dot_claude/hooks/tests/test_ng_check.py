@@ -138,6 +138,49 @@ class NgCheckTest(unittest.TestCase):
                         self.env)
         self.assertIsNotNone(block_reason(proc))
 
+    # --- コード部分の除外 -----------------------------------------------
+
+    def test_inline_code_span_is_not_scanned(self):
+        proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                         "last_assistant_message": "`テスト用NG` はパターン名。"},
+                        self.env)
+        self.assertEqual(proc.stdout.strip(), "")
+
+    def test_fenced_block_is_scanned_by_design(self):
+        # フェンスは扱わない。除外しても実測で減るのはコードブロック内の
+        # em ダッシュだけで、対応付けが壊れたときの被害の方が大きい。
+        proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                         "last_assistant_message":
+                             "設定例:\n```\nテスト用NG\tテスト\t理由X\n```\n以上。"},
+                        self.env)
+        self.assertIsNotNone(block_reason(proc))
+
+    def test_prose_outside_code_still_detected_with_snippet_from_original(self):
+        proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                         "last_assistant_message":
+                             "`テスト用NG` の説明。本文にもテスト用NGを書いた。"},
+                        self.env)
+        reason = block_reason(proc)
+        self.assertIsNotNone(reason)
+        self.assertEqual(reason.count("×"), 0)  # コード内は数えない = 1件のみ
+        self.assertIn("本文にも", reason)        # snippet は潰す前から切る
+
+    def test_prose_between_two_fences_is_still_scanned(self):
+        # フェンスを正規表現でペアリングすると、閉じフェンスと次の開きフェンスが
+        # 組になって間の地の文が丸ごと消える。回帰させないための番人。
+        proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                         "last_assistant_message":
+                             "```\ncode1\n```\n地の文にテスト用NG\n```\ncode2\n```"},
+                        self.env)
+        self.assertIsNotNone(block_reason(proc))
+
+    def test_backtick_masking_never_crosses_newline(self):
+        # 対応の崩れた 1 個のバッククォートが後続行を巻き込まないこと。
+        proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                         "last_assistant_message": "対応の崩れた ` を書いた\nテスト用NG"},
+                        self.env)
+        self.assertIsNotNone(block_reason(proc))
+
     # --- fail-open 系 ---------------------------------------------------
 
     def test_broken_stdin_fails_open(self):
