@@ -1,5 +1,5 @@
 [Unit]
-Description=mpvpaper for DP-2
+Description=mpvpaper for HDMI-A-3
 PartOf=wallpaper.target
 
 [Service]

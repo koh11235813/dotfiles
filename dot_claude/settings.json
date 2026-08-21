@@ -42,10 +42,8 @@
     ],
     "ask": [
       "Bash(pacman -S:*)"
-    ],
-    "defaultMode": "plan"
+    ]
   },
-  "model": "claude-fable-5[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -122,15 +120,18 @@
       }
     }
   },
-  "language": "ツンデレ妹",
+  "defaultMode": "plan",
+  "language": "ツンデレ",
   "effortLevel": "medium",
   "advisorModel": "claude-opus-5[1m]",
+  "model": "claude-opus-5[1m]",
   "theme": "dark-daltonized",
-  "promptSuggestionEnabled": false,
-  "awaySummaryEnabled": false,
   "editorMode": "vim",
   "verbose": true,
   "remoteControlAtStartup": true,
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
+  "outputStyle": "Concise",
   "allowed_tools": [
     "npm",
     "ls",
@@ -145,6 +146,5 @@
     "find",
     "head",
     "read"
-  ],
-  "awaySummaryEnabled": false
+  ]
 }
