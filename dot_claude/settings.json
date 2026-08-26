@@ -120,18 +120,29 @@
       }
     }
   },
-  "defaultMode": "plan",
+  "outputStyle": "Concise",
   "language": "ツンデレ",
-  "effortLevel": "medium",
-  "advisorModel": "claude-opus-5[1m]",
+  "effortLevel": "xhigh",
+  "modelSettings": {
+    "claude-opus-5": {
+      "effortLevel": "medium"
+    },
+    "claude-fable-5": {
+      "effortLevel": "high"
+    }
+  },
+  "advisorModel": "claude-fable-5",
   "model": "claude-opus-5[1m]",
+  "promptSuggestionEnabled": false,
+  "awaySummaryEnabled": false,
+  "skipWorkflowUsageWarning": true,
   "theme": "dark-daltonized",
   "editorMode": "vim",
   "verbose": true,
   "remoteControlAtStartup": true,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
-  "outputStyle": "Concise",
+  "defaultMode": "plan",
   "allowed_tools": [
     "npm",
     "ls",
