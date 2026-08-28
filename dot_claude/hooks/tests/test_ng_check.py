@@ -259,6 +259,32 @@ class NgCheckTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout.strip(), "")
 
+    def test_shipped_patterns_detect_memo_forms(self):
+        """2026-08-29 memo 由来の4パターン (圧縮対句・直訳) が実 TSV で発火する。"""
+        cases = [
+            ("必要条件であって十分条件ではない。", "圧縮対句"),
+            ("決定性は祈りでなく seam が保証する。", "圧縮対句"),
+            ("設定を省くと黙って失敗する。", "直訳"),
+            ("この変更は再現性を壊す。", "直訳"),
+        ]
+        for text, category in cases:
+            with self.subTest(text=text):
+                proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                                 "last_assistant_message": text},
+                                {"NG_PATTERNS_FILE": str(REAL_TSV)})
+                reason = block_reason(proc)
+                self.assertIsNotNone(reason)
+                self.assertIn(category, reason)
+
+    def test_shipped_patterns_allow_dakedenaku(self):
+        """「だけでなく」は普通の並列。圧縮対句パターンの lookbehind が守る。"""
+        proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                         "last_assistant_message":
+                             "この実装は Linux だけでなく macOS でも動く。"},
+                        {"NG_PATTERNS_FILE": str(REAL_TSV)})
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
