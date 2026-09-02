@@ -129,9 +129,12 @@
     },
     "claude-fable-5": {
       "effortLevel": "high"
+    },
+    "claude-fable-5-1": {
+      "effortLevel": "medium"
     }
   },
-  "advisorModel": "claude-fable-5",
+  "advisorModel": "claude-fable-5-1",
   "model": "claude-opus-5[1m]",
   "promptSuggestionEnabled": false,
   "awaySummaryEnabled": false,
