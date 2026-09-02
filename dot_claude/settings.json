@@ -110,7 +110,9 @@
     "clangd-lsp@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
     "exa@claude-plugins-official": true,
-    "agmsg@fujibee-agmsg": true
+    "agmsg@fujibee-agmsg": true,
+    "eli5@claude-community": true,
+    "thermos@cursor-plugins": true
   },
   "extraKnownMarketplaces": {
     "openai-codex": {

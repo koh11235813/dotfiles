@@ -1,4 +1,15 @@
 {{- /* chezmoi:modify-template */ -}}
+{{- /*
+   Codex は toml_edit で config.toml を in-place 書き換えする (marker 位置は無視)。
+   位置ではなく key ownership で分離する:
+     Codex/host 所有 (実ファイルの値を引き継ぐ): mcp_servers, plugins, notify,
+       shell_environment_policy.set, sandbox_workspace_write.writable_roots,
+       features 直下 (code_mode / js_repl を除く), marker 以降の machine-local state
+     chezmoi 所有: それ以外
+   $cur は現在の実ファイル。fresh host (stdin 空) では既定値を出す。
+*/ -}}
+{{- $cur := dict -}}
+{{- if .chezmoi.stdin }}{{ $cur = fromToml .chezmoi.stdin }}{{ end -}}
 #:schema https://developers.openai.com/codex/config-schema.json
 # Codex user configuration.
 # Based on the official sample/reference; active choices include short Japanese reasons.
@@ -15,10 +26,10 @@ personality = "friendly"
 # review_model = "gpt-5.6-sol"
 model_provider = "openai"
 # Let Codex use model metadata so context limits track model updates.
-# model_context_window = 400000
-# model_auto_compact_token_limit = 353000
+model_context_window = 500000
+model_auto_compact_token_limit = 450000
 
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 plan_mode_reasoning_effort = "high"
 model_verbosity = "medium"
 # model_reasoning_summary = "auto" # auto | concise | detailed | none
@@ -93,6 +104,9 @@ check_for_update_on_startup = false
 # Agent roles and concurrency
 ################################################################################
 
+# notify は Codex.app (Computer Use 連携) が書き込む root key。テーブルより前に置く。
+{{ if hasKey $cur "notify" }}notify = {{ toToml $cur.notify }}{{ end }}
+
 [agents]
 # 注意: このテーブルは roles を #[serde(default, flatten)] で持つ
 # (config/src/config_toml.rs:711-713)。直下のキーのタイポは「role 名」として
@@ -132,7 +146,10 @@ default_subagent_reasoning_effort = "medium"
 ################################################################################
 
 [sandbox_workspace_write]
-writable_roots = []
+# writable_roots は実ファイルの値を引き継ぐ (Codex.app / 手動で追加される machine-local パス)。
+# 無条件に引き継ぐ = sandbox 権限の拡大を無条件に受け入れること。
+# apply 前に `chezmoi diff ~/.codex/config.toml` で値を目視監査すること。
+writable_roots = {{ if hasKey $cur "sandbox_workspace_write" }}{{ toToml (default (list) $cur.sandbox_workspace_write.writable_roots) }}{{ else }}[]{{ end }}
 network_access = false
 exclude_tmpdir_env_var = false
 exclude_slash_tmp = false
@@ -141,9 +158,14 @@ exclude_slash_tmp = false
 # Keep ordinary shell context but retain Codex's default secret-name filtering.
 inherit = "core"
 ignore_default_excludes = false
-set = {}
 # exclude / include_only は legacy な正規表現リスト。正式形は
 # [shell_environment_policy.filters] テーブル (#34590)。空配列は無意味なので削除。
+# set は Codex.app が NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S 等を書き込むため実ファイルを引き継ぐ。
+[shell_environment_policy.set]
+{{ if and (hasKey $cur "shell_environment_policy") (hasKey $cur.shell_environment_policy "set") -}}
+{{ range $k, $v := $cur.shell_environment_policy.set }}{{ $k }} = {{ toJson $v }}
+{{ end }}
+{{- end }}
 
 [history]
 persistence = "save-all"
@@ -216,6 +238,12 @@ trace_exporter = "none"
 # prevent_idle_sleep = false
 # shell_zsh_fork = false
 # unified_exec_zsh_fork = false
+#
+# [features] 直下は TUI / `codex --enable` が書き込むため実ファイルを引き継ぐ。
+# code_mode は下で chezmoi が管理、js_repl は Stage::Removed の残骸なので drop する。
+{{ if hasKey $cur "features" -}}
+{{ toToml (dict "features" (omit $cur.features "code_mode" "js_repl")) }}
+{{- end }}
 
 [features.code_mode]
 # Opt into programmatic tool orchestration; this is still under development.
@@ -238,12 +266,21 @@ default_tools_approval_mode = "writes"
 # MCP servers
 ################################################################################
 
+# mcp_servers は Codex 所有。`codex mcp add/remove` と Codex.app (node_repl /
+# computer-use / cua_repl / exa) がテーブル全体を再直列化するため、実ファイルの
+# 値をそのまま引き継ぐ。fresh host のときだけ context7 の既定値を出す。
+# 注意: http_headers は ${VAR} を展開しない (rmcp-client/src/utils.rs:103-128)。
+# 環境変数から Bearer を組み立てるのは bearer_token_env_var のみ。
+{{ if hasKey $cur "mcp_servers" -}}
+{{ toToml (dict "mcp_servers" $cur.mcp_servers) }}
+{{- else -}}
 [mcp_servers.context7]
-# Remote HTTP avoids npx startup cost and expands the API key from the environment.
+# Remote HTTP avoids npx startup cost; the API key is read from the environment.
 enabled = true
 url = "https://mcp.context7.com/mcp"
-http_headers = { "Authorization" = "Bearer CONTEXT7_API_KEY" }
+bearer_token_env_var = "CONTEXT7_API_KEY"
 default_tools_approval_mode = "auto"
+{{- end }}
 
 # Stdio example:
 # [mcp_servers.example]
@@ -290,6 +327,12 @@ default_tools_approval_mode = "auto"
 # path = "/path/to/skill"
 # enabled = false
 
+# plugins.* は cache ではなく install / toggle / uninstall の状態
+# (config/src/plugin_edit.rs)。hardcode すると UI での uninstall を apply で
+# 巻き戻すため、実ファイルを引き継ぐ。fresh host のときだけ既定セットを出す。
+{{ if hasKey $cur "plugins" -}}
+{{ toToml (dict "plugins" $cur.plugins) }}
+{{- else -}}
 [plugins."github@openai-curated"]
 enabled = true
 
@@ -319,14 +362,18 @@ enabled = true
 
 [plugins."template-creator@openai-primary-runtime"]
 enabled = true
+{{- end }}
 
 ################################################################################
 # Machine-local state
 ################################################################################
 
-# Codex and the desktop app may append project trust, generated MCP servers,
-# marketplace cache paths, UI state, hook hashes, and onboarding notices here.
-# Chezmoi preserves this suffix and never commits it.
+# Codex and the desktop app append project trust, marketplace cache paths,
+# desktop UI state, hook hashes, and onboarding notices here.
+# Chezmoi preserves this suffix verbatim and never commits it.
+# (Tables above the marker that Codex also writes — mcp_servers, plugins, notify,
+# shell_environment_policy.set, writable_roots, features — are carried over
+# from the current file via $cur; see the header of this template.)
 # >>> codex-local-state >>>
 {{ if contains "# >>> codex-local-state >>>" .chezmoi.stdin -}}
 {{ regexReplaceAll "(?s)^.*?# >>> codex-local-state >>>\\r?\\n?" .chezmoi.stdin "" }}
