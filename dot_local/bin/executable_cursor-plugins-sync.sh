@@ -69,7 +69,9 @@ find . -name .cursor-plugin -type d | while read -r d; do
 done
 
 # 3. Claude Code requires marketplace sources to be explicitly relative
-sed -i '' 's#"source": "\([^./][^"]*\)"#"source": "./\1"#' .claude-plugin/marketplace.json
+mp=.claude-plugin/marketplace.json
+sed 's#"source": "\([^./][^"]*\)"#"source": "./\1"#' "$mp" >"$mp.tmp"
+mv "$mp.tmp" "$mp"
 
 # 4. drop the keys Claude Code rejects; skills/agents/commands are auto-detected
 #    by directory convention, and Cursor declares them as strings rather than
