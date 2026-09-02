@@ -119,8 +119,19 @@
       "source": {
         "source": "github",
         "repo": "openai/codex-plugin-cc"
-      },
-      "autoUpdate": "true"
+      }
+    },
+    "claude-community": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-community"
+      }
+    },
+    "cursor-plugins": {
+      "source": {
+        "source": "directory",
+        "path": "~/.local/share/cursor-plugins"
+      }
     }
   },
   "outputStyle": "Concise",
