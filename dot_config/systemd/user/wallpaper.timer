@@ -4,11 +4,10 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Timer]
-# ユーザーセッション開始の10秒後に wallpaper.service を起動
 OnActiveSec=10s
 Unit=wallpaper.target
-OnUnitActiveSec=6h
+# A target without StopWhenUnneeded=yes stays active, so a repeat timer never re-fires.
+# OnUnitActiveSec=6h
 
 [Install]
 WantedBy=graphical-session.target
-
