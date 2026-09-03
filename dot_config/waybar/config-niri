@@ -10,13 +10,12 @@
 
     "modules-left": [
         "clock",
-	"network",
-        "custom/window"
-
+        "network",
+        "niri/window"
     ],
 
     "modules-center": [
-        "hyprland/workspaces"
+        "niri/workspaces"
     ],
 
     "modules-right": [
@@ -30,18 +29,15 @@
         "custom/power-menu"
     ],
 
-    "hyprland/workspaces": {
+    "niri/workspaces": {
         "all-outputs": true,
         "tooltip": false
     },
 
-    "custom/window": {
-        "exec": "/home/kinoko/.config/waybar/scripts/window_title.sh",
-        "interval": 1,
-	"restart-interval": 0,
-	"return-type": "plain",
-        "format": "{}",
-	"markup":false
+    "niri/window": {
+        "format": "{title}",
+        "max-length": 30,
+        "separate-outputs": true
     },
 
     "tray": {
@@ -68,8 +64,6 @@
         },
         "actions":  {
             "on-click-right": "mode",
-            "on-scroll-up": "tz_up",
-            "on-scroll-down": "tz_down",
             "on-scroll-up": "shift_up",
             "on-scroll-down": "shift_down"
             }
@@ -94,10 +88,11 @@
     "custom/gpu-usage": {
         "format": "{}",
         "exec": "~/.config/waybar/scripts/gpu_usage.sh",
+        "return-type": "json",
         "interval": 2,
         "tooltip": false,
         "states": {
-            "critical": "([7-9][0-9]%|100%)"
+            "critical": 70
         }
 
     },
@@ -120,14 +115,11 @@
     "custom/volume-ascii": {
         "format": "{}",
         "exec": "~/.config/waybar/scripts/volume_ascii.sh",
+        "return-type": "json",
         "interval": 1,
         "tooltip": false,
         "on-scroll-up": "pactl set-sink-volume @DEFAULT_SINK@ +5%",
-        "on-scroll-down": "pactl set-sink-volume @DEFAULT_SINK@ -5%",
-        "states": {
-            "critical": "\\[.*0.*\\]",
-            "warning": "\\[.*([1]?[0-9]%|20).*\\]"
-        }
+        "on-scroll-down": "pactl set-sink-volume @DEFAULT_SINK@ -5%"
     },
     "power-profiles-daemon": {
         "format": "{icon} ",

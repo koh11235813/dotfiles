@@ -1,30 +1,24 @@
 #!/bin/bash
+# waybar custom module: JSON output with "class" so CSS states work
+# (waybar "states" only accepts integer thresholds, not regex).
 
-# 現在の音量（小数含む）
 vol=$(pactl get-sink-volume @DEFAULT_SINK@ | awk -F'/' '/Volume:/ {gsub(/%/, "", $2); print $2+0}' | head -1)
 
-# 音量が0の場合はMUTED表示＋critical判定用
 if (( $(echo "$vol == 0" | bc -l) )); then
-  echo "[🔇︎ ░░░░░░░░░░ 0%]"
+  printf '{"text":"[🔇︎ ░░░░░░░░░░ 0%%]","class":"critical","percentage":0}\n'
   exit 0
 fi
 
-# 10段階バーに丸めて制限
 level=$(echo "($vol + 0.5)/10" | bc)
 if (( level > 10 )); then level=10; fi
 if (( level < 0 )); then level=0; fi
 
-# ASCIIバー作成
 bar=""
 for ((i=1; i<=10; i++)); do
-  if (( i <= level )); then
-    bar+="█"
-  else
-    bar+="░"
-  fi
+  if (( i <= level )); then bar+="█"; else bar+="░"; fi
 done
 
-# 最終表示
-icon="🔉︎"  # 音量アイコン
+class=""
+if (( $(echo "$vol <= 20" | bc -l) )); then class="warning"; fi
 
-echo "[$icon $bar ${vol}%]"
+printf '{"text":"[🔉︎ %s %s%%]","class":"%s","percentage":%d}\n' "$bar" "$vol" "$class" "${vol%.*}"
