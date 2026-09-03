@@ -6,9 +6,11 @@
 ---- MONITORS ----
 ------------------
 
+{{- if eq .chezmoi.hostname "Arch" }}
 hl.monitor({ output = "DP-2",     mode = "1920x1080@143.98", position = "0x0",     scale = 1 })
 hl.monitor({ output = "DP-3",     mode = "1920x1080@165.00", position = "1920x0",  scale = 1 })
 hl.monitor({ output = "HDMI-A-3", mode = "1920x1080@119.88", position = "-1920x0", scale = 1 })
+{{- end }}
 
 ---------------------
 ---- MY PROGRAMS ----
@@ -24,9 +26,8 @@ local menu        = "sherlock --multi"
 
 -- exec-once equivalent: runs only at compositor startup, not on reloads
 hl.on("hyprland.start", function()
-    hl.exec_cmd("waybar")
+    hl.exec_cmd("~/.config/waybar/scripts/launch.sh")
     hl.exec_cmd("mako")
-    hl.exec_cmd("fcitx5-remote -r")
     hl.exec_cmd("fcitx5 -d --replace")
     hl.exec_cmd("/usr/lib/hyprpolkitagent")
     hl.exec_cmd("discord")
@@ -35,10 +36,10 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("openrgb")
     -- systemdへ環境伝搬（1回でOK）
     hl.exec_cmd("dbus-update-activation-environment --systemd --all")
+    -- gsettings writes persist in dconf; once per session is enough.
+    -- Re-run by hand after editing gtk-3.0/settings.ini.
+    hl.exec_cmd('"${XDG_CONFIG_HOME:-${HOME}/.config}/hypr/scripts/init-gtk.sh"')
 end)
-
--- exec equivalent: runs on startup AND on every config reload
-hl.exec_cmd('"${XDG_CONFIG_HOME:-${HOME}/.config}/hypr/scripts/init-gtk.sh"')
 
 -------------------------------
 ---- ENVIRONMENT VARIABLES ----
@@ -94,7 +95,7 @@ hl.config({
 
     animations = { enabled = true },
 
-    dwindle = { preserve_split = true },
+    dwindle = { pseudotile = true, preserve_split = true },
     master  = { new_status = "master" },
 
     misc = {
@@ -107,7 +108,6 @@ hl.config({
     input = {
         kb_layout      = "us",
         kb_options     = "ctrl:nocaps,altwin:swap_alt_win",
-        force_no_accel = true,
         natural_scroll = true,
         follow_mouse   = 1,
         sensitivity    = 0,
@@ -148,6 +148,7 @@ hl.bind(mainMod .. " + Return", hl.dsp.exec_cmd(terminal))
 hl.bind(mainMod .. " + Q",      hl.dsp.window.close())
 hl.bind(mainMod .. " + SPACE",  hl.dsp.exec_cmd(menu))
 hl.bind(mainMod .. " + P",      hl.dsp.window.pseudo())
+hl.bind(mainMod .. " + J",      hl.dsp.layout("togglesplit")) -- dwindle only
 hl.bind(mainMod .. " + F",      hl.dsp.exec_cmd("firefox"))
 hl.bind(mainMod .. " + D",      hl.dsp.exec_cmd("discord"))
 hl.bind(mainMod .. " + O",      hl.dsp.exec_cmd("osu"))
@@ -170,7 +171,8 @@ hl.bind(mainMod .. " + up",    hl.dsp.focus({ direction = "up" }))
 hl.bind(mainMod .. " + down",  hl.dsp.focus({ direction = "down" }))
 
 hl.bind(mainMod .. " + SHIFT + F", hl.dsp.window.fullscreen())
-hl.bind(mainMod .. " + SHIFT + M", hl.dsp.exit())
+-- uwsm: never use the exit dispatcher, let uwsm tear the session down.
+hl.bind(mainMod .. " + SHIFT + M", hl.dsp.exec_cmd("uwsm stop"))
 
 -- Switch / move-to workspaces with mainMod (+ SHIFT) + [0-9]
 for i = 1, 10 do
@@ -184,8 +186,8 @@ hl.bind(mainMod .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }))
 hl.bind(mainMod .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }))
 
 -- Move/resize windows with mainMod + LMB/RMB and dragging (bindm)
-hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag())
-hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize())
+hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
+hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
 -- Multimedia keys (bindel = locked + repeating)
 hl.bind("XF86AudioRaiseVolume",             hl.dsp.exec_cmd("wpctl set-volume -l 1.2 @DEFAULT_AUDIO_SINK@ 5%+"),   { locked = true, repeating = true })
@@ -214,6 +216,8 @@ hl.window_rule({ name = "steam-ws",      match = { class = "steam" },           
 hl.window_rule({ name = "steam-tile",    match = { class = "steam" },                      float = false })
 hl.window_rule({ name = "beatoraja-cfg", match = { class = "beatoraja 0.8.8 configuration" }, workspace = "2" })
 hl.window_rule({ name = "wuwa-ws",       match = { title = "鳴潮" },                        workspace = "7" })
+hl.window_rule({ name = "wuwa-ws-en",    match = { title = "Wuthering Waves" },             workspace = "7" })
+hl.window_rule({ name = "wuwa-ws-cls",   match = { class = "client-win64-shipping.exe" },   workspace = "7" })
 hl.window_rule({ name = "obs-ws",        match = { class = "com.obsproject.Studio" },      workspace = "10" })
 hl.window_rule({ name = "ds-ws",         match = { title = "DEATH STRANDING DIRECTOR'S CUT" }, workspace = "7" })
 hl.window_rule({ name = "ds-fs",         match = { title = "DEATH STRANDING DIRECTOR'S CUT" }, fullscreen = true })
@@ -223,9 +227,11 @@ hl.window_rule({ name = "bluearchive",   match = { title = "ブルーアーカ�
 hl.window_rule({ name = "kitty-opacity", match = { class = "kitty" },                      opacity = "0.9 0.7 0.85" })
 
 -- workspace → monitor assignments
+{{- if eq .chezmoi.hostname "Arch" }}
 hl.workspace_rule({ workspace = "1",  monitor = "DP-2" })
 hl.workspace_rule({ workspace = "2",  monitor = "DP-3" })
 hl.workspace_rule({ workspace = "3",  monitor = "HDMI-A-3" })
 hl.workspace_rule({ workspace = "7",  monitor = "DP-3" })
 hl.workspace_rule({ workspace = "8",  monitor = "DP-2" })
 hl.workspace_rule({ workspace = "10", monitor = "HDMI-A-3" })
+{{- end }}
