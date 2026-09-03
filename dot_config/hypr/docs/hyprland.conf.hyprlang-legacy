@@ -1,3 +1,17 @@
+# =====================================================================
+#  ⚠️  このファイルは Hyprland に読まれていません（2026-08-20 に退避）
+#
+#  Hyprland は ~/.config/hypr/hyprland.lua が存在する場合、そちらを
+#  優先して読み込み、このファイルは一切参照しません（マージもされません）。
+#  現行の設定は hyprland.lua です。編集はそちらに対して行ってください。
+#
+#  ⚠️  HyprSettings（GUI 設定ツール）はこのファイルのみ読み書きし、
+#      Lua 設定に非対応です。HyprSettings で設定を変更しても
+#      Hyprland には反映されず、エラーも出ません。
+#
+#  経緯: docs/lua-migration-research.md / docs/lua-provider-dispatch-breakage.md
+# =====================================================================
+
 # This is an example Hyprland config file.
 # Refer to the wiki for more information.
 # https://wiki.hypr.land/Configuring/
@@ -16,11 +30,11 @@
 
 # See https://wiki.hypr.land/Configuring/Monitors/
 monitor=DP-2,1920x1080@143.98,0x0,1
-monitor=DP-3,1920x1080@240.00,1920x0,1
+monitor=DP-3,1920x1080@165.00,1920x0,1
 # monitor=DP-4,1920x1080@240.00,0x0,1
-monitor=HDMI-A-3,1920x1080@239.76,-1920x0,1
+monitor=HDMI-A-3,1920x1080@119.88,-1920x0,1
 # monitor=HDMI-A-3,3840x2160@60.00,-3840x0,1
-
+# monitor=DP-3,1920x1080@240.00,1920x0,1
 
 
 ###################
@@ -51,9 +65,10 @@ exec-once = mako &
 exec-once = fcitx5-remote -r &
 exec-once = fcitx5 -d --replace &
 # exec-once = /usr/lib/polkit-kde-authentication-agent-1 &
+# exec-once = exec  --no-startup-id /usr/lib/pam_kwallet_init &
 exec-once = /usr/lib/hyprpolkitagent &
 exec-once = discord  &
-# exec-once = steam &
+exec-once = steam &
 exec-once = hypridle &
 exec-once = openrgb &
 # exec-once = sherlock --daemonize &
@@ -212,7 +227,6 @@ animations {
 
 # See https://wiki.hypr.land/Configuring/Dwindle-Layout/ for more
 dwindle {
-    pseudotile = true # Master switch for pseudotiling. Enabling is bound to mainMod + P in the keybinds section below
     preserve_split = true # You probably want this
 }
 
@@ -271,12 +285,13 @@ device {
 $mainMod = SUPER # Sets "Windows" key as main modifier
 # $mainMod = ALT
 
+
 # Example binds, see https://wiki.hypr.land/Configuring/Binds/ for more
 bind = $mainMod, RETURN, exec, $terminal
 bind = $mainMod, Q, killactive,
 bind = $mainMod, SPACE, exec, $menu
 bind = $mainMod, P, pseudo,
-bind = $mainMod, J, togglesplit,
+# bind = $mainMod, J, togglesplit,
 bind = $mainMod, F, exec, firefox
 bind = $mainMod, D, exec, discord
 bind = $mainMod, O, exec, osu
@@ -381,9 +396,9 @@ windowrule = match:class discord, workspace 3
 windowrule = match:class steam, workspace 2
 windowrule = match:class steam, float off
 windowrule = match:class beatoraja 0.8.8 configuration, workspace 2
-windowrule = match:class client-win64-shipping.exe, workspace 7
+# windowrule = match:class client-win64-shipping.exe, workspace 7
 windowrule = match:title 鳴潮, workspace 7
-windowrule = match:title Wuthering Waves, workspace 7
+# windowrule = match:title Wuthering Waves, workspace 7
 windowrule = match:class com.obsproject.Studio, workspace 10
 # windowrule = match:class steam_app_1850570, workspace 7
 windowrule = match:title DEATH STRANDING DIRECTOR'S CUT, workspace 7
@@ -401,11 +416,6 @@ windowrule = match:class kitty, opacity 0.9 0.7 0.85
 
 # windowrule visual
 # windowrule = opacity 0.8 0.8, class:kitty
-
-
-# Open in fullscreen
-# windowrulev2 = fullscreen, class:^(osu!)$
-# windowrulev2 = fullscreen, class:^(steam_app_3513350)$
 
 # workspace windowrules
 workspace = 1, monitor:DP-2
