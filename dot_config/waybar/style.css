@@ -60,7 +60,8 @@ tooltip {
     border-radius: 8px;
 }
 
-#workspaces button.active {
+#workspaces button.active,
+#workspaces button.focused {
     background: rgba(255, 255, 255, 0.15);
     color: rgba(221, 199, 161, 1.0);
     border-radius: 8px;
@@ -139,7 +140,7 @@ tooltip {
     color: rgba(193, 74, 74, 1.0);
 }
 
-#custom-volume-ascii.warnig {
+#custom-volume-ascii.warning {
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 160, 50, 0.40);
     border-radius: 10px;
