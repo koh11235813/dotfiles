@@ -31,7 +31,6 @@
     ],
 
     "hyprland/workspaces": {
-        "disable-scroll": true,
         "all-outputs": true,
         "tooltip": false
     },
@@ -99,12 +98,14 @@
         "tooltip": false,
         "states": {
             "critical": "([7-9][0-9]%|100%)"
-    }
+        }
 
     },
 
 
     "network": {
+        "format": "eth ↑{bandwidthUpBits} | ↓{bandwidthDownBits}",
+        "format-linked": "eth linked {ifname}",
         "format-wifi" : "wifi ↑{bandwidthUpBits}| ↓{bandwidthDownBits}",
         "format-ethernet": "eth ↑{bandwidthUpBits} | ↓{bandwidthDownBits}",
         "format-disconnected" : "no network",
@@ -147,10 +148,10 @@
         "user": false // Ignore failed user units.
     },
     "custom/power-menu": {
-        "format": "⏻ power ",
+        "format": "⏻",
         "on-click": "~/.config/waybar/scripts/power_menu.sh",
         "tooltip": true,
-        "tooltip-format": "電源メニュー"
+        "tooltip-format": "Power Menu"
     }
 
 
