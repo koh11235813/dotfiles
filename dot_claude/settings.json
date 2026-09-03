@@ -10,7 +10,6 @@
       "Bash(wc:*)",
       "mcp__codex__codex",
       "mcp__codex__codex-reply",
-      "mcp__gemini-cli__chat",
       "Skill(codex:setup)",
       "Skill(codex:rescue)",
       "Bash(python3 -m py_compile:*)",
@@ -30,7 +29,6 @@
       "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
       "Bash(xargs:*)",
       "Bash(PYTHONPATH=src:$PYTHONPATH uv run python3:*)",
-      "Bash(PYTHONPATH=src:$PYTHONPATH uv run python3:*)",
       "Bash(rg:*)",
       "Bash(uv sync:*)",
       "Bash(uv run:*)",
@@ -42,7 +40,8 @@
     ],
     "ask": [
       "Bash(pacman -S:*)"
-    ]
+    ],
+    "defaultMode": "plan"
   },
   "hooks": {
     "UserPromptSubmit": [
@@ -158,21 +157,5 @@
   "verbose": true,
   "remoteControlAtStartup": true,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "defaultMode": "plan",
-  "allowed_tools": [
-    "npm",
-    "ls",
-    "cat",
-    "echo",
-    "git",
-    "python3",
-    "wc",
-    "du",
-    "df",
-    "tail",
-    "find",
-    "head",
-    "read"
-  ]
+  "agentPushNotifEnabled": true
 }
