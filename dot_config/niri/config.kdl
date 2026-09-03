@@ -41,6 +41,7 @@ output "eDP-1" {
 // Hyprland: env = XCURSOR_SIZE,24 / HYPRCURSOR_SIZE,24
 cursor {
     xcursor-size 24
+    hide-when-typing
 }
 
 // Hyprland: env = QT_QPA_PLATFORM,wayland;xcb
@@ -81,7 +82,7 @@ layout {
 }
 
 // Hyprland: exec-once = waybar (~/.config/waybar は既存)
-spawn-at-startup "waybar"
+spawn-at-startup "sh" "-c" "~/.config/waybar/scripts/launch.sh"
 
 // Hyprland: exec-once = /usr/lib/hyprpolkitagent -> mate-polkit に置換
 spawn-at-startup "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"
@@ -104,6 +105,7 @@ spawn-at-startup "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"
 screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
 hotkey-overlay {
+    skip-at-startup
 }
 
 animations {
