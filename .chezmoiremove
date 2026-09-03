@@ -1,0 +1,18 @@
+{{- if eq .chezmoi.hostname "Arch" }}
+# Superseded on 2026-09-03; chezmoi never deletes targets on its own.
+.config/systemd/user/wallpaper-DP-1.service
+.config/systemd/user/wallpaper-DP-2.service
+.config/systemd/user/wallpaper-DP-3.service
+.config/systemd/user/wallpaper-DP-4.service
+.config/systemd/user/wallpaper-HDMI-A-1.service
+.config/systemd/user/wallpaper-HDMI-A-3.service
+.config/systemd/user/wallpaper.service
+.config/waybar/config
+.config/waybar/style.css.1
+.config/waybar/style.css.back
+.config/waybar/scripts/window_title.sh
+.config/hypr/hyprsettings.toml
+.config/hypr/scripts/start_mpvpaper.sh
+.claude/scripts/random-language.sh
+.claude/scripts/session-personality.sh
+{{- end }}

@@ -15,3 +15,8 @@ dot_config/zed/themes/
 .codex
 .opencode
 .hermes
+
+# zed: not synced (host-specific ssh profiles, app state)
+dot_config/zed/
+*.back
+*.bak-*

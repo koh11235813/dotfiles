@@ -1,7 +1,5 @@
 LICENSE
-.config/zed/prompts/**
-.config/zed/conversations/**
-.config/zed/themes/**
+.config/zed/**
 .claude/.credentials.json
 .gemini/brain/**
 .gemini/**/logs/**
@@ -14,4 +12,28 @@ LICENSE
 .config/hypr/**
 .config/waybar/**
 .config/mako/**
+.config/niri/**
+.config/wallpaper/**
+{{- end }}
+
+{{- if eq .chezmoi.os "linux" }}
+{{-   if eq .chezmoi.hostname "Lab-Arch" }}
+# Lab-Arch has uncommitted local edits (DP-1 monitor, --hwdec=no, ...).
+# Keep it untouched until its hyprland.lua migration is done on the machine itself.
+.config/hypr/**
+.config/systemd/**
+.config/waybar/**
+.config/mako/**
+.config/kitty/**
+.config/niri/**
+.config/wallpaper/**
+{{-   else if eq .chezmoi.hostname "Arch" }}
+.config/niri/**
+{{-   else }}
+# Any other Linux host (MacBook/niri): no Hyprland stack.
+.config/hypr/**
+.config/systemd/**
+.config/mako/**
+.config/wallpaper/**
+{{-   end }}
 {{- end }}
