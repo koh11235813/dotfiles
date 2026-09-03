@@ -1,0 +1,11 @@
+{
+  "custom-roll": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "~/.gemini/config/scripts/custom-roll.py",
+        "timeout": 5
+      }
+    ]
+  }
+}
