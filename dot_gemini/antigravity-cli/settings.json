@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "deny": [
+      "command(rm -rf .git)",
+      "command(rm -r .git)",
+      "command(rm -rf .git/*)",
+      "command(rm -r .git/*)"
+    ],
+    "ask": [
+      "command(pacman -S)"
+    ],
+    "allow": [
+      "command(ls)",
+      "command(cat)",
+      "command(echo)",
+      "command(pwd)",
+      "command(tree)",
+      "command(find)",
+      "command(head)",
+      "command(tail)",
+      "command(wc)",
+      "command(du)",
+      "command(df)",
+      "command(grep)",
+      "command(rg)",
+      "command(awk)",
+      "command(xargs)",
+      "command(chmod)",
+      "command(read)",
+      "command(python3)",
+      "command(pytest)",
+      "command(uv)",
+      "command(npm)",
+      "command(git)",
+      "command(pacman -Q)",
+      "command(apt search)",
+      "command(.venv/bin/python3)",
+      "command(.venv/bin/pip)"
+    ]
+  }
+}
