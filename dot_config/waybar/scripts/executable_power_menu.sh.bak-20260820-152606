@@ -7,7 +7,7 @@ selected=$(echo -e "$options" | rofi -dmenu -i -p "Power" -theme-str 'window {wi
 case "$selected" in
     Lock)     loginctl lock-session ;;
     Suspend)  systemctl suspend ;;
-    Logout)   uwsm stop ;;
+    Logout)   hyprctl dispatch exit ;;
     Reboot)   systemctl reboot ;;
     Shutdown) systemctl poweroff ;;
 esac
