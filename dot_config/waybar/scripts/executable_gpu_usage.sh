@@ -1,11 +1,11 @@
 #!/bin/bash
+# waybar custom module: JSON output with "percentage" so integer "states" work.
 
-# radeontopの出力から "gpu X.XX%" の X.XX を抜き出す
 usage=$(radeontop -d - -l 1 | grep -oP 'gpu \K[0-9.]+(?=%)')
 
-# 使用率が取得できなかった場合のフォールバック
 if [[ -z "$usage" ]]; then
-  usage="N/A"
+  printf '{"text":"gpu: N/A"}\n'
+  exit 0
 fi
 
-echo "gpu: ${usage}%"
+printf '{"text":"gpu: %s%%","percentage":%d}\n' "$usage" "${usage%.*}"
