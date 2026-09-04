@@ -1,7 +1,8 @@
 {
   "entries": [
     {
-      "path": "~/.agents/skills"
+      "path": "$HOME/.agents/skills",
+      "exclude": [".*\\.zip$", "^\\.DS_Store$"]
     }
   ]
 }
