@@ -20,17 +20,17 @@
 ################################################################################
 
 # Primary model. 高品質なコーディング作業を優先する。
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 personality = "friendly"
 # /review follows the current session model unless explicitly overridden.
 # review_model = "gpt-5.6-sol"
 model_provider = "openai"
 # Let Codex use model metadata so context limits track model updates.
-model_context_window = 500000
-model_auto_compact_token_limit = 450000
+model_context_window = 1000000
+model_auto_compact_token_limit = 800000
 
-model_reasoning_effort = "xhigh"
-plan_mode_reasoning_effort = "high"
+model_reasoning_effort = "medium"
+plan_mode_reasoning_effort = "max"
 model_verbosity = "medium"
 # model_reasoning_summary = "auto" # auto | concise | detailed | none
 # NOTE: model_supports_reasoning_summaries は 0.147 系で削除済み (#32206)。
@@ -242,7 +242,7 @@ trace_exporter = "none"
 # [features] 直下は TUI / `codex --enable` が書き込むため実ファイルを引き継ぐ。
 # code_mode は下で chezmoi が管理、js_repl は Stage::Removed の残骸なので drop する。
 {{ if hasKey $cur "features" -}}
-{{ toToml (dict "features" (omit $cur.features "code_mode" "js_repl")) }}
+{{ toToml (dict "features" (omit $cur.features "code_mode" "js_repl" "context_management")) }}
 {{- end }}
 
 [features.code_mode]
@@ -250,6 +250,9 @@ trace_exporter = "none"
 enabled = true
 # excluded_tool_namespaces = []
 # direct_only_tool_namespaces = []
+
+[features.context_management]
+experimental_mode=true
 
 ################################################################################
 # Apps and connectors
