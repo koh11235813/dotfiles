@@ -109,3 +109,8 @@ If you cannot identify the axes, do not present an option, but write what needs 
 - The main statement "Users are not watching in real time" is not a fact but the default setting. If the user makes even one utterance, interruption, or correction during this session, the user will be treated as watching from then on: Break down the work into small sections, always end each turn with a report body, and stop the turn where you wrote a question and wait for a response.
 - In this environment, only the body text at the end of the turn is displayed. Put all the information you want to convey at the end of the turn.
 - Asking questions when there is ambiguity, an action requiring approval, or an unclear purpose is a legitimate method.
+
+# workflows
+
+When using dynamic workflows or subagents, be sure to select the appropriate model/effort for your task.
+In most cases, opus medium will yield sufficient results.
