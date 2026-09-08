@@ -242,7 +242,7 @@ trace_exporter = "none"
 # [features] 直下は TUI / `codex --enable` が書き込むため実ファイルを引き継ぐ。
 # code_mode は下で chezmoi が管理、js_repl は Stage::Removed の残骸なので drop する。
 {{ if hasKey $cur "features" -}}
-{{ toToml (dict "features" (omit $cur.features "code_mode" "js_repl" "context_management")) }}
+{{ toToml (dict "features" (omit $cur.features "code_mode" "js_repl" "context_management" "multi_agent_v2")) }}
 {{- end }}
 
 [features.code_mode]
@@ -253,6 +253,15 @@ enabled = true
 
 [features.context_management]
 experimental_mode=true
+
+# wait_agent の timeout_ms を短く取りすぎて待ち切れずに戻ってくるのを防ぐ。
+# 組み込み値は min 10_000 / default 30_000 / max 3_600_000 (core/src/config/mod.rs)。
+# min 未満の指定は黙って min に切り上げ、max 超過はエラー (tools/handlers/multi_agents_v2/wait.rs)。
+# よって min と default の両方を上げないと「引数省略時」と「短すぎる指定」の両方を塞げない。
+# [features] 直下の multi_agent_v2 = true は不要 (models_cache の multi_agent_version = "v2" で選択される)。
+[features.multi_agent_v2]
+min_wait_timeout_ms = 120000
+default_wait_timeout_ms = 120000
 
 ################################################################################
 # Apps and connectors
