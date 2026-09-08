@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.codex/hooks/session_start.sh",
+            "statusMessage": "Loading custom roll",
+            "additionalContextLimit": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.codex/runcat-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
