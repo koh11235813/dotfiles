@@ -4,7 +4,8 @@
    位置ではなく key ownership で分離する:
      Codex/host 所有 (実ファイルの値を引き継ぐ): mcp_servers, plugins, notify,
        shell_environment_policy.set, sandbox_workspace_write.writable_roots,
-       features 直下 (code_mode / js_repl を除く), marker 以降の machine-local state
+       features 直下 (code_mode / js_repl を除く), tui.model_availability_nux,
+       上記以外の top-level table 全て (desktop / marketplaces / projects / hooks など)
      chezmoi 所有: それ以外
    $cur は現在の実ファイル。fresh host (stdin 空) では既定値を出す。
 */ -}}
@@ -189,6 +190,13 @@ status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-usa
 # 注意: 誤ったモード遷移が入力事故に直結するとの指摘あり。合わないと感じたら
 # この行を false にするか、下の ctrl-alt-v / スラッシュコマンド /vim で都度トグルする。
 vim_mode_default = true
+
+# tui.model_availability_nux は Codex が「新モデル案内を表示済み」として tui の中に書く。
+# tui 自体は chezmoi 所有なので末尾の denylist では拾えず、ここで個別に引き継ぐ。
+{{ if and (hasKey $cur "tui") (hasKey $cur.tui "model_availability_nux") -}}
+[tui.model_availability_nux]
+{{ toToml $cur.tui.model_availability_nux }}
+{{- end }}
 
 [tui.keymap.global]
 # toggle_vim_mode はデフォルトのキー割り当てを持たない
@@ -380,13 +388,18 @@ enabled = true
 # Machine-local state
 ################################################################################
 
-# Codex and the desktop app append project trust, marketplace cache paths,
-# desktop UI state, hook hashes, and onboarding notices here.
-# Chezmoi preserves this suffix verbatim and never commits it.
-# (Tables above the marker that Codex also writes — mcp_servers, plugins, notify,
-# shell_environment_policy.set, writable_roots, features — are carried over
-# from the current file via $cur; see the header of this template.)
-# >>> codex-local-state >>>
-{{ if contains "# >>> codex-local-state >>>" .chezmoi.stdin -}}
-{{ regexReplaceAll "(?s)^.*?# >>> codex-local-state >>>\\r?\\n?" .chezmoi.stdin "" }}
-{{- end -}}
+# Codex と desktop app は project trust, marketplace cache paths, desktop UI state,
+# hook hashes (hooks.state), onboarding notices などをこのファイルに追記する。
+# 位置マーカーは使わない: Codex は toml_edit で新しい table を「最後の table の直後」に
+# 挿入するため、末尾コメントのマーカーは常に追い越されて検出が空振りする (#5)。
+# 代わりに key ownership で分離する。$cur の top-level table のうち、この template が
+# 出力する (= chezmoi 所有の) key を除いた残りを全て引き継ぐ (denylist 方式)。
+# Codex が新しい table を増やしても apply で消えない。
+# root の scalar key はここに出すと TOML として不正 (table の後に root key) なので table のみ。
+{{- $managed := list "agents" "apps" "features" "feedback" "history" "mcp_servers" "model_providers" "notice" "otel" "plugins" "sandbox_workspace_write" "shell_environment_policy" "tui" }}
+{{- range $k, $v := $cur }}
+{{- if and (kindIs "map" $v) (not (has $k $managed)) }}
+
+{{ toToml (dict $k $v) -}}
+{{- end }}
+{{- end }}
