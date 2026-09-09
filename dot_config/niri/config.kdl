@@ -81,9 +81,6 @@ layout {
     }
 }
 
-// Hyprland: exec-once = waybar (~/.config/waybar は既存)
-spawn-at-startup "sh" "-c" "~/.config/waybar/scripts/launch.sh"
-
 // Hyprland: exec-once = /usr/lib/hyprpolkitagent -> mate-polkit に置換
 spawn-at-startup "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"
 
