@@ -23,11 +23,13 @@ tooltip {
     border-radius: 10px;
 }
 
+#window,
 #clock,
 #tray,
 #cpu,
 #memory,
 #custom-gpu-usage,
+#custom-brightness,
 #battery,
 #power-profiles-daemon,
 #systemd-failed-units,
@@ -72,6 +74,10 @@ tooltip {
     border-radius: 8px;
 }
 
+#window {
+    color: rgba(212, 190, 152, 0.90);
+}
+
 #clock,
 #network {
     background: rgba(255, 255, 255, 0.08);
@@ -96,6 +102,7 @@ tooltip {
 #cpu,
 #memory,
 #custom-gpu-usage,
+#custom-brightness,
 #custom-volume-ascii,
 #systemd-failed-units,
 #custom-power-menu {
@@ -145,4 +152,11 @@ tooltip {
     border: 1px solid rgba(255, 160, 50, 0.40);
     border-radius: 10px;
     color: rgba(184, 96, 24, 1.0);
+}
+
+#custom-volume-ascii.muted {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    color: rgba(150, 150, 150, 0.70);
 }
