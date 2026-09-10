@@ -88,9 +88,7 @@ spawn-at-startup "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"
 // -w と swaylock -f の組み合わせは swayidle(1) の推奨。
 // swayidle の lock イベントが logind の Lock シグナルを受けるので、
 // loginctl lock-session でもロックがかかる。
-// 初回起動では無効化 (swaylock の解錠が未検証のため)。
-// 手動 swaylock で解錠を確認したら、この行頭の "// " を外して有効化する。
-// spawn-sh-at-startup r#"swayidle -w timeout 300 'swaylock -f -c 000000' timeout 600 'niri msg action power-off-monitors' resume 'niri msg action power-on-monitors' before-sleep 'swaylock -f -c 000000' lock 'swaylock -f -c 000000'"#
+spawn-sh-at-startup r#"swayidle -w timeout 300 'swaylock -f -c 333333' timeout 600 'niri msg action power-off-monitors' resume 'niri msg action power-on-monitors' before-sleep 'swaylock -f -c 333333' lock 'swaylock -f -c 333333'"#
 
 // xwayland-satellite は niri 25.08 以降で組み込み管理されるため、
 // spawn-at-startup も DISPLAY の手動設定も不要 (0.8.2 導入済み)。
