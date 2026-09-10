@@ -23,8 +23,9 @@
         "tray",
         "cpu",
         "memory",
-        "custom/gpu-usage",
 	"systemd-failed-units",
+        "custom/brightness",
+        "battery",
         "custom/volume-ascii",
         "custom/power-menu"
     ],
@@ -36,8 +37,7 @@
 
     "niri/window": {
         "format": "{title}",
-        "max-length": 30,
-        "separate-outputs": true
+        "max-length": 30
     },
 
     "tray": {
@@ -85,19 +85,6 @@
         }
     },
 
-    "custom/gpu-usage": {
-        "format": "{}",
-        "exec": "~/.config/waybar/scripts/gpu_usage.sh",
-        "return-type": "json",
-        "interval": 2,
-        "tooltip": false,
-        "states": {
-            "critical": 70
-        }
-
-    },
-
-
     "network": {
         "format": "eth ↑{bandwidthUpBits} | ↓{bandwidthDownBits}",
         "format-linked": "eth linked {ifname}",
@@ -112,12 +99,38 @@
         "max-length": 40
     },
 
+    "custom/brightness": {
+        "format": "{}",
+        "exec": "~/.config/waybar/scripts/brightness_ascii.sh",
+        "return-type": "json",
+        "interval": 2,
+        "tooltip": false,
+        "on-scroll-up": "brightnessctl -d acpi_video0 -e4 -n2 set 5%+",
+        "on-scroll-down": "brightnessctl -d acpi_video0 -e4 -n2 set 5%-"
+    },
+
+    "battery": {
+        "interval": 30,
+        "states": {
+            "warning": 20,
+            "critical": 10
+        },
+        "format": "[{icon} {capacity}%]",
+        "format-charging": "[{icon} {capacity}%+]",
+        "format-plugged": "[{icon} {capacity}%~]",
+        // waybar picks icon floor(capacity * n / 100); 10 entries = 10% buckets,
+        // duplicated so the bar rounds to the nearest 20% like volume/brightness.
+        "format-icons": ["░░░░░", "█░░░░", "█░░░░", "██░░░", "██░░░", "███░░", "███░░", "████░", "████░", "█████"],
+        "tooltip-format": "{time}\n{power:.1f} W"
+    },
+
     "custom/volume-ascii": {
         "format": "{}",
         "exec": "~/.config/waybar/scripts/volume_ascii.sh",
         "return-type": "json",
         "interval": 1,
         "tooltip": false,
+        "on-click": "pactl set-sink-mute @DEFAULT_SINK@ toggle",
         "on-scroll-up": "pactl set-sink-volume @DEFAULT_SINK@ +5%",
         "on-scroll-down": "pactl set-sink-volume @DEFAULT_SINK@ -5%"
     },
