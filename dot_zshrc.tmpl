@@ -284,3 +284,18 @@ fi
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-5"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-5[1m]"
 export CLAUDE_CODE_NO_FLICKER=1
+
+# custom-roll を hook 出力ではなく system prompt に入れる（compact で薄れないように）。
+# zsh 以外から起動した場合は SessionStart hook がフォールバックとして注入する。
+function claude {
+    case "$1" in
+        agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|project|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade)
+            command claude "$@"; return ;;
+    esac
+    local roll
+    roll=$("$HOME/.claude/scripts/custom-roll.sh")
+    if [ -z "$roll" ]; then
+        command claude "$@"; return
+    fi
+    CLAUDE_CUSTOM_ROLL_INJECTED=1 command claude --append-system-prompt "$roll" "$@"
+}
