@@ -6,6 +6,9 @@
 
 ROLL_DIR="$HOME/.claude/custom-roll"
 
+# zsh の claude 関数が system prompt に注入済みなら二重注入しない。
+[ -n "$CLAUDE_CUSTOM_ROLL_INJECTED" ] && exit 0
+
 #MARKER="<!-- custom-roll: imouto -->"
 ## 2. プロジェクトに対応するMEMORY.mdパスを決定
 #if [ -n "$CLAUDE_PROJECT_DIR" ]; then
