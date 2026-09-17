@@ -299,3 +299,18 @@ function claude {
     fi
     CLAUDE_CUSTOM_ROLL_INJECTED=1 command claude --append-system-prompt "$roll" "$@"
 }
+
+# custom-roll を hook 出力ではなく developer_instructions に入れる（compact で消えないように）。
+# zsh 以外から起動した場合は SessionStart hook がフォールバックとして注入する。
+function codex {
+    case "$1" in
+        agents|login|logout|mcp|plugin|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|queue|archive|delete|migrate-rollouts|unarchive|cloud|exec-server|features|help)
+            command codex "$@"; return ;;
+    esac
+    local roll
+    roll=$("$HOME/.codex/scripts/custom-roll.sh")
+    if [ -z "$roll" ]; then
+        command codex "$@"; return
+    fi
+    CODEX_CUSTOM_ROLL_INJECTED=1 command codex -c "developer_instructions=$roll" "$@"
+}
