@@ -40,6 +40,7 @@
     ],
     "defaultMode": "plan"
   },
+  "model": "claude-opus-5[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -128,6 +129,12 @@
         "source": "directory",
         "path": "~/.local/share/cursor-plugins"
       }
+    },
+    "typesafe-ai": {
+      "source": {
+        "source": "github",
+        "repo": "typesafe-ai/skills"
+      }
     }
   },
   "outputStyle": "Concise",
@@ -144,6 +151,9 @@
       "effortLevel": "medium"
     }
   },
+  "advisorModel": "claude-fable-5-1",
+  "promptSuggestionEnabled": false,
+  "awaySummaryEnabled": false,
   "pluginConfigs": {
     "agents-md@builtin": {
       "options": {
@@ -152,17 +162,13 @@
     }
   },
   "timeFormat": "auto",
-  "advisorModel": "claude-fable-5-1",
-  "model": "claude-opus-5[1m]",
-  "promptSuggestionEnabled": false,
-  "awaySummaryEnabled": false,
   "skipWorkflowUsageWarning": true,
   "theme": "dark-daltonized",
   "editorMode": "vim",
   "verbose": true,
+  "switchModelsOnFlag": false,
+  "autoContinueAtUsageLimit": false,
   "remoteControlAtStartup": true,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "switchModelsOnFlag": false,
-  "autoContinueAtUsageLimit": false
+  "agentPushNotifEnabled": true
 }
