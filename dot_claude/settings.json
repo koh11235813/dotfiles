@@ -109,7 +109,8 @@
     "exa@claude-plugins-official": true,
     "agmsg@fujibee-agmsg": true,
     "eli5@claude-community": true,
-    "thermos@cursor-plugins": true
+    "thermos@cursor-plugins": true,
+    "typesafe@typesafe-ai": true
   },
   "extraKnownMarketplaces": {
     "openai-codex": {
@@ -138,7 +139,7 @@
     }
   },
   "outputStyle": "Concise",
-  "language": "ツンデレ",
+  "language": "Japanese",
   "effortLevel": "xhigh",
   "modelSettings": {
     "claude-opus-5": {
