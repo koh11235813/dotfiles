@@ -40,14 +40,14 @@
     ],
     "defaultMode": "plan"
   },
-  "model": "claude-opus-5[1m]",
+  "model": "claude-fable-5-1[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/scripts/opus5.sh"
+            "command": "$HOME/.claude/scripts/prompt-by-model.sh"
           }
         ]
       }
@@ -59,6 +59,15 @@
           {
             "type": "command",
             "command": "$HOME/.claude/scripts/custom-roll.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/scripts/model-state.sh"
           }
         ]
       }
@@ -84,6 +93,16 @@
             "command": "python3 $HOME/.claude/hooks/ng-check.py",
             "timeout": 10,
             "statusMessage": "NG表現チェック中..."
+          }
+        ]
+      }
+    ],
+    "PostModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/scripts/model-state.sh"
           }
         ]
       }
@@ -138,7 +157,6 @@
       }
     }
   },
-  "outputStyle": "Concise",
   "language": "Japanese",
   "effortLevel": "xhigh",
   "modelSettings": {
