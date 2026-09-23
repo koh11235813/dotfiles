@@ -2,7 +2,6 @@
 {
   "colorScheme": "colorblind-friendly dark",
   "editor": "vim",
-  "enableTelemetry": false,
   "enableTerminalSandbox": true,
   "model": "Gemini 3.8 Flash (High)",
   "notifications": true,
@@ -49,7 +48,10 @@
       "command(pacman -Q)",
       "command(apt search)",
       "command(.venv/bin/python3)",
-      "command(.venv/bin/pip)"
+      "command(.venv/bin/pip)",
+      "command(bash ~/.agents/skills/agmsg/scripts/whoami.sh \"$PWD\" antigravity)",
+      "command(bash ~/.agents/skills/agmsg/scripts/delivery.sh set turn antigravity \"$PWD\")",
+      "command(bash ~/.agents/skills/agmsg/scripts/inbox.sh)"
     ]
   }
 }
