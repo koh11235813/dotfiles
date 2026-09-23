@@ -106,6 +106,16 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/scripts/model-state-cleanup.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
