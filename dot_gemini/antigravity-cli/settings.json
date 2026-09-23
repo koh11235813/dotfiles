@@ -8,9 +8,10 @@
   "notifications": true,
   "showFeedbackSurvey": false,
   "statusLine": {
-    "type": "",
-    "command": "",
-    "enabled": true
+    "type": "command",
+    "command": "~/.gemini/antigravity-cli/statusline.sh",
+    "enabled": true,
+    "stack_with_default": true
   },
   "permissions": {
     "deny": [
