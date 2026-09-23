@@ -1,7 +1,9 @@
 
 {
+  "agentMode": "plan",
   "colorScheme": "colorblind-friendly dark",
   "editor": "vim",
+  "editorMode": "vim",
   "enableTerminalSandbox": true,
   "model": "Gemini 3.8 Flash (High)",
   "notifications": true,
