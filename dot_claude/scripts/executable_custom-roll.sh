@@ -22,8 +22,7 @@ ROLL_DIR="$HOME/.claude/custom-roll"
 
 [ -d "$ROLL_DIR" ] || exit 0
 
-# custom-roll/ は ~/.agents/custom-roll への symlink。-H がないと起点をたどらず0件になる。
-ROLL_LIST=$(find -H "$ROLL_DIR" -maxdepth 1 -name '*.md' -type f | sort)
+ROLL_LIST=$(find "$ROLL_DIR" -maxdepth 1 -name '*.md' -type f | sort)
 ROLL_COUNT=$(printf '%s\n' "$ROLL_LIST" | grep -c '.')
 [ "$ROLL_COUNT" -gt 0 ] || exit 0
 
