@@ -7,5 +7,14 @@
         "timeout": 5
       }
     ]
+  },
+  "plan-report": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "~/.gemini/config/scripts/plan-report.py",
+        "timeout": 5
+      }
+    ]
   }
 }
