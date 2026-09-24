@@ -28,6 +28,28 @@ prefix_rule(
 # Git commands that inspect repository state without intentionally changing it.
 prefix_rule(
     pattern = [
+        "git",
+        [
+            "status",
+            "diff",
+            "log",
+            "show",
+            "ls-files",
+            "show-ref",
+            "rev-list",
+            "rev-parse",
+            "ls-tree",
+            "grep",
+        ],
+    ],
+    decision = "allow",
+    justification = "Inspect repository state without prompting.",
+    match = ["git status --short --branch", "git diff --stat"],
+    not_match = ["git commit -m change"],
+)
+
+prefix_rule(
+    pattern = [
         "rtk",
         "git",
         [
@@ -50,10 +72,15 @@ prefix_rule(
         "rtk git diff --stat",
         "rtk git rev-list --all --objects",
     ],
-    not_match = [
-        "rtk git commit -m change",
-        "git status --short",
-    ],
+    not_match = ["rtk git commit -m change"],
+)
+
+prefix_rule(
+    pattern = ["git", "stash", ["list", "show"]],
+    decision = "allow",
+    justification = "Inspect stashes without changing them.",
+    match = ["git stash list", "git stash show --stat stash@{0}"],
+    not_match = ["git stash drop stash@{0}"],
 )
 
 prefix_rule(
@@ -65,6 +92,24 @@ prefix_rule(
         "rtk git stash show --stat stash@{0}",
     ],
     not_match = ["rtk git stash drop stash@{0}"],
+)
+
+# Staging is reversible and useful during routine local work. This prefix also
+# matches bulk staging; AGENTS.md instructs the agent to stage only requested files.
+prefix_rule(
+    pattern = ["git", "add"],
+    decision = "allow",
+    justification = "Stage requested changes without prompting.",
+    match = ["git add dot_codex/AGENTS.md", "git add -p"],
+    not_match = ["git commit -m change"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", "add"],
+    decision = "allow",
+    justification = "Stage requested changes through RTK without prompting.",
+    match = ["rtk git add dot_codex/AGENTS.md"],
+    not_match = ["rtk git commit -m change"],
 )
 
 # Require confirmation for deletion and Git operations that can discard work.

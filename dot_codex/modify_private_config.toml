@@ -4,7 +4,7 @@
    位置ではなく key ownership で分離する:
      Codex/host 所有 (実ファイルの値を引き継ぐ): mcp_servers, plugins, notify,
        shell_environment_policy.set, sandbox_workspace_write.writable_roots,
-       features 直下 (code_mode / js_repl を除く), tui.model_availability_nux,
+       features 直下 (code_mode / js_repl / reasoning_effort_override を除く), tui.model_availability_nux,
        上記以外の top-level table 全て (desktop / marketplaces / projects / hooks など)
      chezmoi 所有: それ以外
    $cur は現在の実ファイル。fresh host (stdin 空) では既定値を出す。
@@ -248,10 +248,11 @@ trace_exporter = "none"
 # unified_exec_zsh_fork = false
 #
 # [features] 直下は TUI / `codex --enable` が書き込むため実ファイルを引き継ぐ。
+# reasoning_effort_override は true に固定する。
 # code_mode は下で chezmoi が管理、js_repl は Stage::Removed の残骸なので drop する。
-{{ if hasKey $cur "features" -}}
-{{ toToml (dict "features" (omit $cur.features "code_mode" "js_repl" "context_management" "multi_agent_v2")) }}
-{{- end }}
+{{ $features := dict "reasoning_effort_override" true -}}
+{{- if hasKey $cur "features" }}{{ $features = merge $features (omit $cur.features "code_mode" "js_repl" "context_management" "multi_agent_v2") }}{{ end -}}
+{{ toToml (dict "features" $features) }}
 
 [features.code_mode]
 # Opt into programmatic tool orchestration; this is still under development.
