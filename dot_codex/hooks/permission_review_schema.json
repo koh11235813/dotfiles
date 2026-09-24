@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "title": "PermissionReview",
+  "x-order": ["allow", "reason"],
+  "properties": {
+    "allow": {"type": "boolean"},
+    "reason": {"type": "string"}
+  },
+  "required": ["allow", "reason"]
+}
