@@ -113,6 +113,15 @@ prefix_rule(
 )
 
 # Require confirmation for deletion and Git operations that can discard work.
+# Execpolicy matches prefixes, not a trailing -delete at an arbitrary position.
+# The PermissionRequest hook only considers a tightly constrained find -delete.
+prefix_rule(
+    pattern = ["find"],
+    decision = "prompt",
+    justification = "Review find commands; only narrow -delete forms are eligible for automatic approval.",
+    match = ["find . -type f -name '*.tmp' -delete"],
+)
+
 prefix_rule(
     pattern = ["rm"],
     decision = "prompt",
