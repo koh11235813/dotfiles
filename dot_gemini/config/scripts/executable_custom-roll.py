@@ -66,7 +66,13 @@ def main():
         return
 
     try:
-        content = role_file.read_text(encoding="utf-8")
+        # ツール結果の直後に差し込まれるので、囲まないと Gemini がツール出力の一部と読み違える
+        content = (
+            '<role_setting source="hook">\n'
+            "Tone and persona for this conversation. Honesty and task rules outrank it.\n\n"
+            + role_file.read_text(encoding="utf-8").strip()
+            + "\n</role_setting>"
+        )
         result = {
             "injectSteps": [
                 {
