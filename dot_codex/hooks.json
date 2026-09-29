@@ -8,7 +8,7 @@
             "type": "command",
             "command": "$HOME/.codex/hooks/permission_review.py",
             "timeout": 30,
-            "statusMessage": "Reviewing narrow find deletion"
+            "statusMessage": "Reviewing find command"
           }
         ]
       }
