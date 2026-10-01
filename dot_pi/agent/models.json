@@ -1,0 +1,23 @@
+{
+    "providers": {
+        "lm-studio": {
+            "baseUrl": "http://localhost:1234/v1",
+            "api": "openai-completions",
+            "apiKey": "lmstudio",
+            "models": [
+                {
+                    "id": "qwen3.8-27b-uncensored",
+                    "contextWindow": 262144,
+                    "reasoning": true
+                },
+                {
+                    "id": "llm-jp-4-33b-thinking",
+                    "reasoning": true
+                },
+                {
+                    "id": "meta/muse-glimmer"
+                }
+            ]
+        }
+    }
+}
