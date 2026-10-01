@@ -1,0 +1,19 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+   pi は settings.json を実行中に書き換える (model 切替で defaultProvider/defaultModel、
+   /thinking で defaultThinkingLevel、/theme で theme、更新で lastChangelogVersion)。
+   chezmoi は既定値だけを持ち、実ファイルにある key は常に実ファイルの値を残す。
+   既定の key が全部そろっていれば実ファイルをそのまま返す。toPrettyJson は key を
+   並べ替えるので、通すと pi が書くたびに chezmoi diff に順序だけの差分が出る。
+   $cur は現在の実ファイル。fresh host (stdin 空) では既定値を出す。
+*/ -}}
+{{- $defaults := dict "theme" "dark" "defaultProvider" "openrouter" "defaultModel" "deepseek/deepseek-v4-flash-0731" -}}
+{{- $cur := dict -}}
+{{- if .chezmoi.stdin }}{{ $cur = fromJson .chezmoi.stdin }}{{ end -}}
+{{- $missing := false -}}
+{{- range keys $defaults }}{{ if not (hasKey $cur .) }}{{ $missing = true }}{{ end }}{{ end -}}
+{{- if $missing -}}
+{{ merge $cur $defaults | toPrettyJson }}
+{{- else -}}
+{{ .chezmoi.stdin }}
+{{- end -}}
