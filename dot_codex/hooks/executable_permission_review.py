@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
-"""Auto-approve read-only find, and workspace-confined find -delete after Jev review.
+"""Auto-approve read-only find, regenerable rm, agmsg scripts, and reviewed find -delete.
+
+The hook also sees sandbox escalations and cannot tell them apart, so every allow
+must be safe to run outside the sandbox.
 
 Read-only find is allowed without a model. A filtered -delete whose roots stay
 inside the workspace is dry-run first; Jev sees only match counts per extension,
 never file names, and a dry run that fails, matches too much, or reaches into
 .git goes to a human. Jev is the only reviewer: in trials the on-device fm model
-denied even safe deletions and was swayed by rewording. The payload omits the
-shell tool's workdir, so an otherwise eligible -delete with a relative root is
-denied with a request to retry using absolute roots. Any unsupported request or
-backend failure emits no decision, leaving the normal Codex approval flow in charge.
-Never print the request, model output, or API key.
+denied even safe deletions and was swayed by rewording.
+
+rm is allowed without a model when every target is inside the workspace, has no
+tracked file, holds no .git, and is either gitignored or a known cache name.
+
+agmsg's inbox, history, and delivery status run as-is; delivery set turn codex
+must name the session cwd. send and join are left out because they start
+ext-tool drivers that post to Slack or Jev.
+
+The payload omits the shell tool's workdir, so an otherwise eligible -delete or
+rm with a relative path is denied with a request to retry using absolute paths.
+Any unsupported request or backend failure emits no decision, leaving the normal
+Codex approval flow in charge. Never print the request, model output, or API key.
 """
 
 import json
@@ -33,9 +44,9 @@ RETRY = "retry"
 ALLOW = "allow"
 DENY = "deny"
 RETRY_MESSAGE = (
-    "The permission hook cannot see the shell tool's workdir, so find -delete with "
-    "relative roots is not reviewed. Re-run the same command with each root written "
-    "as the absolute path you intend."
+    "The permission hook cannot see the shell tool's workdir, so find -delete or rm "
+    "with relative paths is not reviewed. Re-run the same command with each path "
+    "written as the absolute path you intend."
 )
 SHELL_METACHARS = set(";&|$`<>(){}!#~\\\n")
 GLOB_CHARS = set("*?[")
@@ -46,6 +57,10 @@ PATTERN_ARGS = {"-name": r"[A-Za-z0-9._*?-]+", "-iname": r"[A-Za-z0-9._*?-]+",
                 "-path": r"[A-Za-z0-9._*?/-]+", "-ipath": r"[A-Za-z0-9._*?/-]+"}
 VALUE_ARGS = {"-type": r"[fd]", "-maxdepth": r"[0-9]+", "-mindepth": r"[0-9]+",
               "-mtime": r"[+-]?[0-9]+"}
+RM_FLAG_RE = r"-[rRfdv]+|--force|--recursive"
+CACHE_NAMES = {".DS_Store", "__pycache__"}
+CACHE_EXTENSIONS = {".pyc", ".pyo"}
+AGMSG_SCRIPTS = os.path.expanduser("~/.agents/skills/agmsg/scripts")
 
 
 def shell_safe(command):
@@ -139,6 +154,116 @@ def classify_find(command, cwd):
     return DELETE, roots
 
 
+def classify_rm(command, cwd):
+    """Return (DELETE, relative targets), (RETRY, ()), or None."""
+    if not shell_safe(command):
+        return None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if not argv or argv[0] != "rm" or not isinstance(cwd, str) or not os.path.isabs(cwd):
+        return None
+    targets, options_done = [], False
+    for token in argv[1:]:
+        if not options_done and token == "--":
+            options_done = True
+        elif token.startswith("-"):
+            # GNU rm reads options after operands too; after -- they are odd names.
+            if options_done or not re.fullmatch(RM_FLAG_RE, token):
+                return None
+        else:
+            targets.append(token)
+    relative = tuple(workspace_root(target, cwd) for target in targets)
+    if not targets or None in relative or "." in relative:
+        return None
+    if not all(os.path.isabs(target) for target in targets):
+        return RETRY, ()
+    return DELETE, relative
+
+
+def git(cwd, *args):
+    try:
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True,
+                              timeout=4, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def regenerable(target, cwd):
+    """True when deleting target loses nothing git tracks or a build cannot recreate."""
+    tracked = git(cwd, "ls-files", "-z", "--", target)
+    if tracked is None or tracked.returncode not in (0, 128) or tracked.stdout:
+        return False
+    path = os.path.join(cwd, target)
+    if os.path.isdir(path) and not os.path.islink(path):
+        for _, dirs, files in os.walk(path):
+            if touches_git(dirs + files):
+                return False
+    if tracked.returncode == 0:
+        ignored = git(cwd, "check-ignore", "-q", "--", target)
+        if ignored is None or ignored.returncode not in (0, 1):
+            return False
+        if ignored.returncode == 0:
+            return True
+    name = os.path.basename(target)
+    return name in CACHE_NAMES or os.path.splitext(name)[1] in CACHE_EXTENSIONS
+
+
+def quoted_argv(command):
+    """Return argv when the shell would expand nothing outside quotes; otherwise None."""
+    script_start = len("bash ") if command.startswith("bash ") else 0
+    quote, previous = None, " "
+    for index, char in enumerate(command):
+        if quote == "'":
+            quote = None if char == "'" else quote
+            if quote and not (char.isprintable() or char in "\n\t"):
+                return None
+        elif quote == '"':
+            if char in "$`\\" or not (char.isprintable() or char in "\n\t"):
+                return None
+            quote = None if char == '"' else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "~" and index == script_start and command[index + 1:index + 2] == "/":
+            pass
+        elif (char in SHELL_METACHARS or char in GLOB_CHARS or not char.isprintable()
+              or (char == "=" and previous == " ")):
+            return None
+        previous = char
+    if quote:
+        return None
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return None
+
+
+def agmsg_allowed(command, cwd):
+    """True for agmsg scripts that touch only agmsg state or the session's own hooks."""
+    if not isinstance(cwd, str) or not os.path.isabs(cwd):
+        return False
+    argv = quoted_argv(command)
+    if argv and argv[0] == "bash":
+        argv = argv[1:]
+    if not argv:
+        return False
+    script, args = os.path.expanduser(argv[0]), argv[1:]
+    name = os.path.basename(script)
+    if not os.path.isabs(script) or os.path.realpath(script) != os.path.realpath(
+            os.path.join(AGMSG_SCRIPTS, name)):
+        return False
+    if name in ("inbox.sh", "history.sh"):
+        return True
+    if name != "delivery.sh" or not args:
+        return False
+    if args[0] == "status":
+        return True
+    return (args[:3] == ["set", "turn", "codex"] and len(args) == 4
+            and os.path.isabs(args[3])
+            and os.path.realpath(args[3]) == os.path.realpath(cwd))
+
+
 def extension_bucket(path):
     extension = os.path.splitext(os.path.basename(path))[1]
     if not extension:
@@ -210,7 +335,22 @@ def decide(event):
         return None
     tool_input = event.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    verdict = classify_find(command, event.get("cwd")) if isinstance(command, str) else None
+    if not isinstance(command, str):
+        return None
+    cwd = event.get("cwd")
+    # Paths were checked against the event cwd; a different workdir runs elsewhere.
+    elsewhere = any(tool_input.get(key) not in (None, cwd) for key in ("workdir", "cwd"))
+    if agmsg_allowed(command, cwd):
+        return None if elsewhere else ALLOW
+    verdict = classify_rm(command, cwd)
+    if verdict is not None:
+        kind, targets = verdict
+        if kind == RETRY:
+            return DENY
+        if elsewhere or not all(regenerable(target, cwd) for target in targets):
+            return None
+        return ALLOW
+    verdict = classify_find(command, cwd)
     if verdict is None:
         return None
     kind, roots = verdict
@@ -218,8 +358,7 @@ def decide(event):
         return ALLOW
     if kind == RETRY:
         return DENY
-    # The roots were checked against the event cwd; a different workdir runs elsewhere.
-    if any(tool_input.get(key) not in (None, event["cwd"]) for key in ("workdir", "cwd")):
+    if elsewhere:
         return None
     summary = dry_run_summary(find_argv(command), event["cwd"])
     if summary is None:
