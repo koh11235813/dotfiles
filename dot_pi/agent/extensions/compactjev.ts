@@ -18,9 +18,9 @@
  * small.
  *
  * Providers are tried in order until one has usable credentials:
- *   typesafe/jev-latest, openrouter/typesafe/jev-latest,
+ *   typesafe/jev-latest, openrouter/~typesafe/jev-latest,
  *   cloudflare-workers-ai/typesafe/jev, vercel-ai-gateway/typesafe-ai/jev,
- *   opencode/jev-latest.
+ *   opencode/jev-1.13.
  */
 
 import type { ClassifierApi, ClassifierModel, ClassifierQuestion } from "@earendil-works/pi-ai";
@@ -31,10 +31,10 @@ type AgentMessage = SessionBeforeCompactEvent["preparation"]["messagesToSummariz
 /** (provider, id) candidates for a Jev classifier, in preference order. */
 const JEV_CANDIDATES: Array<[string, string]> = [
 	["typesafe", "jev-latest"],
-	["openrouter", "typesafe/jev-latest"],
+	["openrouter", "~typesafe/jev-latest"],
 	["cloudflare-workers-ai", "typesafe/jev"],
 	["vercel-ai-gateway", "typesafe-ai/jev"],
-	["opencode", "jev-latest"],
+	["opencode", "jev-1.13"],
 ];
 
 /** Tool outputs at or below this many characters already fit the summarizer's per-result cut. */
@@ -81,7 +81,8 @@ interface LogBatch {
 function findJev(ctx: ExtensionContext): ClassifierModel<ClassifierApi> | undefined {
 	for (const [provider, id] of JEV_CANDIDATES) {
 		const model = ctx.modelRegistry.findOfType("classifier", provider, id);
-		if (model) return model;
+		// findOfType is a catalog lookup and returns models whose provider has no credential.
+		if (model && ctx.modelRegistry.getProviderAuthStatus(provider).configured) return model;
 	}
 	return undefined;
 }
@@ -174,7 +175,7 @@ async function scoreBatch(
 	goal: string,
 	batch: LogBatch,
 	signal: AbortSignal,
-): Promise<boolean> {
+): Promise<{ ok: true } | { ok: false; error: string }> {
 	const questions: Record<string, ClassifierQuestion> = {};
 	batch.lines.forEach((_, i) => {
 		questions[`l${i}`] = {
@@ -193,12 +194,12 @@ async function scoreBatch(
 		{ signal },
 	);
 	// A failed batch leaves its probabilities at 1: an unscored line might be the error itself.
-	if (result.stopReason !== "stop") return false;
+	if (result.stopReason !== "stop") return { ok: false, error: result.errorMessage ?? result.stopReason };
 	batch.lines.forEach(({ block, index }, i) => {
 		const answer = result.answers[`l${i}`];
 		if (answer?.type === "bool") block.probabilities[index] = answer.probability;
 	});
-	return true;
+	return { ok: true };
 }
 
 /** Keep the highest-ranked lines within KEEP_CHARS, then trim until the collapsed text fits MIN_LOG_CHARS. */
@@ -281,11 +282,14 @@ export default function (pi: ExtensionAPI) {
 			// Promise.all rejects on the first throw but cannot cancel the other workers.
 			let stopped = false;
 			let failed = 0;
+			let firstError = "";
 			const worker = async (): Promise<void> => {
 				while (!stopped && next < batches.length && !signal.aborted) {
 					const batch = batches[next++];
 					try {
-						if (await scoreBatch(ctx, jev, goal, batch, signal)) continue;
+						const scored = await scoreBatch(ctx, jev, goal, batch, signal);
+						if (scored.ok) continue;
+						firstError ||= scored.error;
 						batch.target.failed++;
 						failed++;
 					} catch (error) {
@@ -298,7 +302,7 @@ export default function (pi: ExtensionAPI) {
 			if (signal.aborted) return undefined;
 
 			if (failed === batches.length) {
-				ctx.ui.notify(`compactjev: all ${batches.length} Jev requests failed — compacting without log filter`, "warning");
+				ctx.ui.notify(`compactjev: all ${batches.length} Jev requests failed (${firstError}) — compacting without log filter`, "warning");
 				return undefined;
 			}
 			// A target none of whose batches scored would be cut by original order alone.
@@ -322,7 +326,7 @@ export default function (pi: ExtensionAPI) {
 			preparation.turnPrefixMessages.splice(0, preparation.turnPrefixMessages.length, ...prefix);
 
 			const total = batches.reduce((n, b) => n + (scoredTargets.has(b.target) ? b.lines.length : 0), 0);
-			const failures = failed ? `, ${failed}/${batches.length} Jev requests failed (their lines kept)` : "";
+			const failures = failed ? `, ${failed}/${batches.length} Jev requests failed (their lines kept): ${firstError}` : "";
 			ctx.ui.notify(`compactjev: dropped ${dropped}/${total} log lines in ${scoredTargets.size} tool outputs${failures}`, "info");
 		} catch (error) {
 			if (!signal.aborted) {
