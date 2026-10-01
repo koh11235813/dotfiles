@@ -57,7 +57,7 @@ prefix_rule(
 prefix_rule(
     pattern = ["rm"],
     decision = "prompt",
-    justification = "Confirm file deletion before running rm outside the sandbox.",
+    justification = "Route rm through the review hook: absolute workspace targets that are untracked and gitignored or cache files are auto-allowed, relative targets are denied with a retry hint, and anything else reaches a human.",
     match = ["rm -rf build"],
 )
 

@@ -8,7 +8,7 @@
             "type": "command",
             "command": "$HOME/.codex/hooks/permission_review.py",
             "timeout": 30,
-            "statusMessage": "Reviewing find command"
+            "statusMessage": "Reviewing permission request"
           }
         ]
       }
