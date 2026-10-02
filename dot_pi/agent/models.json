@@ -6,9 +6,16 @@
             "apiKey": "lmstudio",
             "models": [
                 {
-                    "id": "qwen3.8-27b-uncensored",
+                    "id": "jonathancoletti/qwen3.8-27b-uncensored",
                     "contextWindow": 262144,
-                    "reasoning": true
+                    "reasoning": true,
+                    "thinkingLevelMap": {
+                        "minimal": null,
+                        "low": "low",
+                        "medium": "medium",
+                        "high": null,
+                        "xhigh": "xhigh"
+                    }
                 },
                 {
                     "id": "llm-jp-4-33b-thinking",

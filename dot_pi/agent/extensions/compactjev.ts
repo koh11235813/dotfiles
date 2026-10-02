@@ -265,6 +265,38 @@ function rebuild(m: AgentMessage, target: LogTarget): { message: AgentMessage; d
 	return changed ? { message: { ...m, content }, dropped } : { message: m, dropped };
 }
 
+/** Size of one filtered tool output before and after compactjev. */
+interface TargetStats {
+	command: string;
+	lines: number;
+	dropped: number;
+	before: number;
+	after: number;
+}
+
+/** Characters of the text the summarizer serializes for a tool output. */
+function textLength(m: AgentMessage): number {
+	if (m.role === "bashExecution") return m.output.length;
+	if (m.role !== "toolResult") return 0;
+	return m.content.reduce((n, c) => n + (c.type === "text" ? c.text.length : 0), 0);
+}
+
+function percent(before: number, after: number): string {
+	return before ? `-${Math.round(((before - after) / before) * 100)}%` : "-0%";
+}
+
+/** A total line (ending in `suffix`) followed by one line per tool output, largest reduction first. */
+function formatStats(stats: TargetStats[], suffix: string): string {
+	const sum = (key: "lines" | "dropped" | "before" | "after"): number => stats.reduce((n, s) => n + s[key], 0);
+	const before = sum("before");
+	const after = sum("after");
+	const head = `compactjev: ${before} → ${after} chars (${percent(before, after)}), dropped ${sum("dropped")}/${sum("lines")} lines in ${stats.length} tool outputs${suffix}`;
+	const rows = [...stats]
+		.sort((a, b) => b.before - b.after - (a.before - a.after))
+		.map((s) => `  ${s.before} → ${s.after} chars (${percent(s.before, s.after)}), ${s.dropped}/${s.lines} lines: ${s.command.slice(0, 80)}`);
+	return [head, ...rows].join("\n");
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.on("session_before_compact", async (event, ctx) => {
 		const jev = findJev(ctx);
@@ -309,13 +341,19 @@ export default function (pi: ExtensionAPI) {
 			const scoredTargets = new Set(batches.map((b) => b.target).filter((t) => t.failed < t.batches));
 			for (const target of scoredTargets) selectLines(target);
 
-			let dropped = 0;
+			const stats: TargetStats[] = [];
 			const filter = (messages: AgentMessage[]): AgentMessage[] =>
 				messages.map((m) => {
 					const target = targets.get(m);
 					if (!target || !scoredTargets.has(target)) return m;
 					const rebuilt = rebuild(m, target);
-					dropped += rebuilt.dropped;
+					stats.push({
+						command: target.command,
+						lines: nonBlankLines(target).length,
+						dropped: rebuilt.dropped,
+						before: textLength(m),
+						after: textLength(rebuilt.message),
+					});
 					return rebuilt.message;
 				});
 			const summarize = filter(preparation.messagesToSummarize);
@@ -325,9 +363,10 @@ export default function (pi: ExtensionAPI) {
 			preparation.messagesToSummarize.splice(0, preparation.messagesToSummarize.length, ...summarize);
 			preparation.turnPrefixMessages.splice(0, preparation.turnPrefixMessages.length, ...prefix);
 
-			const total = batches.reduce((n, b) => n + (scoredTargets.has(b.target) ? b.lines.length : 0), 0);
 			const failures = failed ? `, ${failed}/${batches.length} Jev requests failed (their lines kept): ${firstError}` : "";
-			ctx.ui.notify(`compactjev: dropped ${dropped}/${total} log lines in ${scoredTargets.size} tool outputs${failures}`, "info");
+			const unscored = targets.size - scoredTargets.size;
+			const skipped = unscored ? `, ${unscored} tool outputs left unfiltered` : "";
+			ctx.ui.notify(formatStats(stats, `${failures}${skipped}`), "info");
 		} catch (error) {
 			if (!signal.aborted) {
 				const message = error instanceof Error ? error.message : String(error);
