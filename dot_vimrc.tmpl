@@ -94,7 +94,7 @@ call plug#begin('~/.vim/plugged')
   Plug 'vim-airline/vim-airline'
   Plug 'vim-airline/vim-airline-themes'
   Plug 'luochen1990/rainbow'
-  Plug 'cocopon/iceberg.vim'
+  Plug 'catppuccin/vim', { 'as': 'catppuccin', 'branch': 'main' }
   Plug 'rust-lang/rust.vim'
   Plug 'scrooloose/nerdtree'
   Plug 'jiangmiao/auto-pairs'
@@ -122,5 +122,8 @@ nmap <silent> gi <Plug>(coc-implementation)
 nmap <silent> gr <Plug>(coc-references)
 
 set termguicolors
-colorscheme iceberg
+" kitty は BCE をしないので、vim が背景塗りを端末任せにすると
+" スクロールや改行で消えた部分だけ背景色が抜ける
+let &t_ut=''
+colorscheme catppuccin_mocha
 set background=dark
