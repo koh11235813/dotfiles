@@ -38,7 +38,7 @@
     "ask": [
       "Bash(pacman -S:*)"
     ],
-    "defaultMode": "plan"
+    "defaultMode": "auto"
   },
   "model": "claude-opus-5-5[1m]",
   "hooks": {
