@@ -21,7 +21,7 @@
 ################################################################################
 
 # Primary model. 高品質なコーディング作業を優先する。
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 personality = "friendly"
 # /review follows the current session model unless explicitly overridden.
 # review_model = "gpt-5.6-sol"
