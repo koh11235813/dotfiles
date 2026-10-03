@@ -54,6 +54,20 @@ setopt pushd_ignore_dups
 # Key bindings
 bindkey -v
 KEYTIMEOUT=1
+# カーソル形状を kitty の shell integration だけに任せると、ssh 先や他の端末ではモードが見えない。
+# 形は kitty と同じ（点滅ブロック／点滅バー）にして、両方が出しても結果が変わらないようにする
+function zle-line-init zle-keymap-select {
+  case $KEYMAP in
+    vicmd|visual) print -n '\e[1 q' ;;
+    *)            print -n '\e[5 q' ;;
+  esac
+}
+function zle-line-finish {
+  print -n '\e[0 q'
+}
+zle -N zle-line-init
+zle -N zle-keymap-select
+zle -N zle-line-finish
 autoload -Uz history-search-end
 zle -N history-beginning-search-backward-end history-search-end
 zle -N history-beginning-search-forward-end history-search-end
