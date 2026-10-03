@@ -183,7 +183,7 @@ animations = true
 show_tooltips = true
 theme = "catppuccin-mocha"
 status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-usage", "five-hour-limit", "weekly-limit", "context-window-size", "fast-mode"]
-# alternate_screen = "auto"
+alternate_screen = "always"
 
 # composer を Vim の Normal モードで開始する (config/src/types.rs:706-709)。
 # 実装は tui/src/bottom_pane/textarea/vim.rs。[profiles.*.tui] では設定不可。
