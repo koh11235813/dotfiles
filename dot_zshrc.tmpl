@@ -52,16 +52,44 @@ setopt print_eight_bit
 setopt pushd_ignore_dups
 
 # Key bindings
+bindkey -v
+KEYTIMEOUT=1
+# カーソル形状を kitty の shell integration だけに任せると、ssh 先や他の端末ではモードが見えない。
+# 形は kitty と同じ（点滅ブロック／点滅バー）にして、両方が出しても結果が変わらないようにする
+function zle-line-init zle-keymap-select {
+  case $KEYMAP in
+    vicmd|visual) print -n '\e[1 q' ;;
+    *)            print -n '\e[5 q' ;;
+  esac
+}
+function zle-line-finish {
+  print -n '\e[0 q'
+}
+zle -N zle-line-init
+zle -N zle-keymap-select
+zle -N zle-line-finish
 autoload -Uz history-search-end
 zle -N history-beginning-search-backward-end history-search-end
 zle -N history-beginning-search-forward-end history-search-end
-bindkey '^p' history-beginning-search-backward-end
-bindkey '^n' history-beginning-search-forward-end
-bindkey '^R' history-incremental-pattern-search-backward
-bindkey '^A' beginning-of-line
-bindkey '^E' end-of-line
-bindkey '^K' kill-line
-bindkey '^U' backward-kill-line
+bindkey -M vicmd 'k' history-beginning-search-backward-end
+bindkey -M vicmd 'j' history-beginning-search-forward-end
+bindkey -M vicmd '/' history-incremental-pattern-search-backward
+# viins 既定の vi-backward-delete-char はインサート開始位置より前を消せない
+bindkey -M viins '^?' backward-delete-char
+
+# Text objects: ci", da( etc.
+autoload -Uz select-bracketed select-quoted
+zle -N select-bracketed
+zle -N select-quoted
+for km in viopp visual; do
+  for c in {a,i}${(s..)^:-'()[]{}<>bB'}; do
+    bindkey -M $km $c select-bracketed
+  done
+  for c in {a,i}${(s..)^:-\'\"\`\|,./:;=+@}; do
+    bindkey -M $km $c select-quoted
+  done
+done
+unset km c
 
 # Completion
 case ${OSTYPE} in
@@ -154,8 +182,6 @@ case ${OSTYPE} in
         ;;
 
     linux*)
-        [[ "$TERM" == "linux" ]] && export LANG=C.UTF-8
-
         if [[ -x /usr/bin/lesspipe ]]; then
             eval "$(SHELL=/bin/sh lesspipe)"
         fi
