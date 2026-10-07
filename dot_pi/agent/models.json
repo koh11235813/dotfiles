@@ -22,7 +22,16 @@
                     "reasoning": true
                 },
                 {
-                    "id": "meta/muse-glimmer"
+                    "id": "ista-daslab/qwen3.8-flash-next-gsq-rco",
+                    "contextWindow": 262144,
+                    "reasoning": true,
+                    "thinkingLevelMap": {
+                        "minimal": null,
+                        "low": "low",
+                        "medium": "medium",
+                        "high": null,
+                        "xhigh": "xhigh"
+                    }
                 }
             ]
         }
