@@ -4,8 +4,9 @@
  * Pi は承認もサンドボックスも持たないので、AGENTS.md の禁止事項は文章でしかない。
  * `tool_call` を拾い、bash の command と edit / write の path を規則に照らす。
  *
- * 見ていないもの: MCP ツールと他の拡張が登録したツール、ユーザーが自分で打つ `!` コマンド
- * (`user_bash`)。bash 経由のファイル書き込み (`>`, `tee`, `sed -i`) は PATH_RULES ではなく
+ * /permissions は組み込み reader の出自と登録済みツールの readOnlyHint で判定するが、実際の副作用は検証しない。
+ * ユーザーが自分で打つ `!` コマンド (`user_bash`) は対象外。サンドボックスではない。
+ * bash 経由のファイル書き込み (`>`, `tee`, `sed -i`) は PATH_RULES ではなく
  * BASH_RULES の担当になる。
  *
  * confirm は UI が要る。subagent は子の Pi を `--mode json -p` で起動するので、その中では
@@ -17,7 +18,8 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { type ExtensionAPI, isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { isPermissionMode, isPermissionState, judgePermission, PERMISSIONS_ENTRY, type PermissionMode, type PermissionState } from "./permissions.ts";
 import { BASH_RULES, chezmoiTarget, evaluate, PATH_RULES, type Rule } from "./rules.ts";
 
 /** ダイアログと通知に出す対象の上限。数十行のヒアドキュメントが画面を埋めないようにする。 */
@@ -49,6 +51,39 @@ function chezmoiManaged(): Set<string> {
 }
 
 export default function (pi: ExtensionAPI) {
+	let mode: PermissionMode = "normal";
+
+	function restore(ctx: ExtensionContext) {
+		mode = "normal";
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type === "custom" && entry.customType === PERMISSIONS_ENTRY && isPermissionState(entry.data)) {
+				mode = entry.data.mode;
+			}
+		}
+	}
+
+	pi.on("session_start", (_event, ctx) => restore(ctx));
+	pi.on("session_tree", (_event, ctx) => restore(ctx));
+
+	pi.registerCommand("permissions", {
+		description: "Show or set tool permissions: normal, ask, readonly",
+		handler: async (args, ctx) => {
+			const requested = args.trim();
+			if (requested) {
+				if (!isPermissionMode(requested)) {
+					ctx.ui.notify("Usage: /permissions [normal|ask|readonly]", "warning");
+					return;
+				}
+				pi.appendEntry(PERMISSIONS_ENTRY, { version: 1, mode: requested } satisfies PermissionState);
+				mode = requested;
+			}
+			ctx.ui.notify(
+				`Permissions: ${mode}. Fixed guard rules always apply. readonly allows builtin read/grep/find/ls only with source=builtin and path=builtin:<exact tool name>, or registered tools with trusted readOnlyHint=true, never bash/edit/write/powershell; ask confirms other tools. Hints are not verified. Covers tool_call only, not user ! commands or processes outside Pi. Not a sandbox; mode is persisted per session and active branch (normal by default).`,
+				"info",
+			);
+		},
+	});
+
 	pi.on("tool_call", async (event, ctx) => {
 		let rule: Rule | undefined;
 		let subject = "";
@@ -60,7 +95,28 @@ export default function (pi: ExtensionAPI) {
 			subject = resolve(ctx.cwd, event.input.path.replace(/^~(?=\/|$)/, homedir()));
 			rule = evaluate([...PATH_RULES, chezmoiTarget(chezmoiManaged())], subject);
 		}
-		if (!rule) return undefined;
+		// 固定の forbid はモードやメタデータ、確認ダイアログより先に適用する。
+		if (rule?.decision === "forbid") {
+			if (ctx.hasUI) ctx.ui.notify(`guard[${rule.id}] blocked: ${head(subject)}`, "warning");
+			return { block: true, reason: `guard[${rule.id}]: ${rule.reason}` };
+		}
+
+		const permission = judgePermission(
+			mode,
+			event.toolName,
+			mode === "normal" ? undefined : pi.getAllTools().find((tool) => tool.name === event.toolName),
+		);
+		if (permission === "forbid") {
+			const reason = `guard[readonly]: ${event.toolName} is not an allowed read-only tool.`;
+			if (ctx.hasUI) ctx.ui.notify(reason, "warning");
+			return { block: true, reason };
+		}
+
+		if (!rule) {
+			if (permission !== "confirm") return undefined;
+			if (ctx.hasUI && await ctx.ui.confirm("guard: ask", `${event.toolName}\n\n${head(JSON.stringify(event.input))}\n\nAllow?`)) return undefined;
+			return { block: true, reason: `guard[ask]: ${event.toolName} was not approved.` };
+		}
 
 		if (rule.decision === "confirm" && ctx.hasUI) {
 			if (await ctx.ui.confirm(`guard: ${rule.id}`, `${head(subject)}\n\n${rule.reason}\n\nAllow?`)) return undefined;
