@@ -1,13 +1,13 @@
 /**
  * bash ツールを OS の境界に入れる部品。macOS は sandbox-exec (seatbelt)、Linux は bubblewrap を直接呼ぶ。
  *
- * 絞るのはファイルへの書き込みだけ。読み取りとネットワークは絞らない
- * (ネットワークは全部か無しかしか選べず、無しでは開発にならない)。
+ * 絞るのはファイルへの書き込みと、認証情報の置き場 (READ_DENIED_PATHS) の読み取り。それ以外の読み取りと
+ * ネットワークは絞らない (ネットワークは全部か無しかしか選べず、無しでは開発にならない)。
  * 書ける場所は「何を書けるか」の表 (EXTRA_WRITE_PATHS) とセッションの root で決まり、判定の枠は index.ts が持つ。
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import type { PermissionMode } from "./permissions.ts";
@@ -62,6 +62,39 @@ export const EXTRA_WRITE_PATHS: Array<() => string | undefined> = [
 ];
 
 /**
+ * full 以外で読ませない場所。ファイルでもディレクトリでもよく、無くてもよい。
+ * 普通の開発コマンドが読まない認証情報の置き場だけを並べる。`~/.gnupg` (commit の署名)、`~/.config/gh`、
+ * `~/.git-credentials`、`~/.npmrc`、`~/.pi/agent/auth.json`、`.zshenv` 以外の rc は入れていない。
+ * sandbox の中の git / gh / npm / シェルの起動がそれを読むので、塞ぐと正当な作業が止まる。
+ * 止めるのはファイルを読むことだけ。Pi のプロセスが既に持っている環境変数 (`.zshenv` の中身が行き着く先) は
+ * sandbox の中の `env` でそのまま見える。環境変数を削ると、それを当てにしている道具まで動かなくなる。
+ */
+export const READ_DENIED_PATHS: Array<() => string> = [
+	// 秘密鍵。読めなくなるので、sandbox の中の ssh は鍵も config も known_hosts も使えない。
+	() => join(homedir(), ".ssh"),
+	() => join(homedir(), ".env"),
+	() => join(homedir(), ".zshenv"),
+	() => join(homedir(), ".aws"),
+	() => join(homedir(), ".netrc"),
+];
+
+/**
+ * 読ませない場所の、解決後のパス。無いものも落とさない (seatbelt の規則はパスが無くても書け、後から作られても読めない)。
+ * symlink ならリンク先も足す。OS の境界が照合するのは解決後のパスで、リンク自体の名前だけ塞いでも中身は読める。
+ */
+export function readDenied(): string[] {
+	return [
+		...new Set(
+			READ_DENIED_PATHS.flatMap((entry) => {
+				const path = entry();
+				const unresolved = join(real(dirname(path)) ?? dirname(path), basename(path));
+				return [unresolved, real(path) ?? unresolved];
+			}),
+		),
+	];
+}
+
+/**
  * root がホームディレクトリを含む (`/` や `~` で Pi を起動した)。
  * そのまま書けるようにすると `~/.ssh` もシェルの rc も書けて、sandbox が名前だけになる。
  */
@@ -80,7 +113,12 @@ export function containsHome(root: string): boolean {
 export function writeRoots(mode: Exclude<PermissionMode, "full">, root: string, scratch: string, git?: string): string[] {
 	const paths =
 		mode === "readonly" ? [scratch] : [containsHome(root) ? undefined : root, tmpdir(), git, ...EXTRA_WRITE_PATHS.map((entry) => entry())];
-	const found = [...new Set(paths.flatMap((path) => (path && real(path)) || []))];
+	// 読ませない場所と重なるものは書ける場所にしない (`~/.ssh` の中で Pi を起動した、リンク先が root の中にある)。
+	// 中にあれば中身を書き換えられ、外側にあれば親ディレクトリごと rename して差し替えられる。
+	const denied = readDenied();
+	const found = [...new Set(paths.flatMap((path) => (path && real(path)) || []))].filter(
+		(path) => !denied.some((entry) => within(entry, path) || within(path, entry)),
+	);
 	// 他の root の中にあるもの (普通のリポジトリの .git など) は重ねて書かない。
 	return found.filter((path) => !found.some((other) => other !== path && within(other, path)));
 }
@@ -111,10 +149,11 @@ export function inside(roots: string[], path: string): boolean {
 }
 
 /**
- * seatbelt のプロファイル。後に書いた規則が勝つので、全部許可 → 書き込み拒否 → roots だけ再許可の順。
+ * seatbelt のプロファイル。後に書いた規則が勝つので、全部許可 → 書き込み拒否 → roots だけ再許可 →
+ * denied の読み取り拒否の順。読み取り拒否を最後に置くのは、どの許可にも上書きさせないため。
  * /dev の節点はシェルのリダイレクト (`> /dev/null`, `>&2` 相当の `/dev/stderr`) と pty に要る。
  */
-export function seatbelt(roots: string[]): string {
+export function seatbelt(roots: string[], denied: string[]): string {
 	return [
 		"(version 1)",
 		"(allow default)",
@@ -133,20 +172,35 @@ export function seatbelt(roots: string[]): string {
 		// readonly では /var/tmp を開けていないので、その名前だけ通す。
 		'\t(literal "/private/var/tmp")',
 		'\t(regex #"^/private/var/tmp/sh-thd-[0-9]+$"))',
+		// subpath はそのパス自身にも当たるので、ファイルとディレクトリを分けない (無いパスは種類が分からない)。
+		// 入口そのものの stat だけ戻す。塞ぐと `ls -la ~` が失敗で終わる。中の一覧も、中のファイルの stat も通らないまま。
+		...(denied.length > 0
+			? [
+					`(deny file-read* ${denied.map((path) => `(subpath ${JSON.stringify(path)})`).join(" ")})`,
+					`(allow file-read-metadata ${denied.map((path) => `(literal ${JSON.stringify(path)})`).join(" ")})`,
+				]
+			: []),
 	].join("\n");
 }
 
 /**
  * bwrap の引数。`/` を読み取り専用で重ね、roots だけ書けるように重ね直す。--unshare-net は付けない。
+ * denied は roots の後で隠す (後の mount が勝つ)。ディレクトリは空の tmpfs、ファイルは /dev/null を重ねるので、
+ * seatbelt と違い読むと失敗せず空に見える。mount 先が要るので実在するものだけ。symlink のままの名前は
+ * 重ねられないので飛ばし、リンク先 (readDenied が別に返す) を隠す。
  * --unshare-pid は --proc の前提 (user namespace の中で /proc を張り直すには pid namespace が要る) で、
  * 同時に sandbox の外のプロセスを ptrace して抜ける道を塞ぐ。
  * --new-session (端末への TIOCSTI 注入を塞ぐ) は --unshare-pid と --die-with-parent が前提。単独で付けると
  * 子が別のプロセスグループになり、Pi の時間切れ・中断の kill が届かずに残る (Arch で実測)。
  */
-export function bwrap(roots: string[]): string[] {
+export function bwrap(roots: string[], denied: string[]): string[] {
 	return [
 		"--ro-bind", "/", "/",
 		...roots.flatMap((root) => ["--bind-try", root, root]),
+		...denied.flatMap((path) => {
+			if (real(path) !== path) return [];
+			return statSync(path).isDirectory() ? ["--tmpfs", path] : ["--ro-bind", "/dev/null", path];
+		}),
 		"--dev", "/dev",
 		"--unshare-pid",
 		"--proc", "/proc",
@@ -157,12 +211,12 @@ export function bwrap(roots: string[]): string[] {
 }
 
 /** sandbox を起動する argv。後ろに実行するコマンドを続ける。対応していない OS では無し。 */
-export function sandboxArgv(roots: string[], platform: string = process.platform): string[] | undefined {
-	if (platform === "darwin") return ["/usr/bin/sandbox-exec", "-p", seatbelt(roots)];
+export function sandboxArgv(roots: string[], denied: string[], platform: string = process.platform): string[] | undefined {
+	if (platform === "darwin") return ["/usr/bin/sandbox-exec", "-p", seatbelt(roots, denied)];
 	if (platform === "linux") {
 		// PATH からは探さない。root 配下の PATH (node_modules/.bin など) に `bwrap` を置かれると sandbox ごと差し替わる。
 		const binary = ["/usr/bin/bwrap", "/bin/bwrap"].find((path) => existsSync(path));
-		return binary && [binary, ...bwrap(roots)];
+		return binary && [binary, ...bwrap(roots, denied)];
 	}
 	return undefined;
 }
@@ -191,7 +245,7 @@ export const sandbox = { available: undefined as boolean | undefined };
  */
 export function sandboxAvailable(): boolean {
 	if (sandbox.available !== undefined) return sandbox.available;
-	const argv = sandboxArgv([]);
+	const argv = sandboxArgv([], []);
 	if (!argv) return false;
 	try {
 		execFileSync(argv[0], [...argv.slice(1), "/bin/bash", "-c", ":"], { stdio: "ignore", timeout: 5000 });

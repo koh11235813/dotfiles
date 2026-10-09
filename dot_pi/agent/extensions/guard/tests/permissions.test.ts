@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -327,6 +327,67 @@ test("Pi組み込みreaderはヒントなしでも許可するが、同名の拡
 	assert.ok(blocked(await app.emit("tool_call", call("read", { path: "README.md" }))));
 	app.tools.push({ name: "powershell", annotations: { readOnlyHint: true } });
 	assert.ok(blocked(await app.emit("tool_call", call("powershell", { command: "Set-Content file changed" }))));
+});
+
+test("full以外では読ませない場所へのread/grep/find/ls/editを確認し、UIなしでは遮断する", async () => {
+	const home = process.env.HOME!;
+	const root = dir("home", "read-project");
+	try {
+		writeFileSync(join(dir("home", ".ssh"), "id_test"), "SECRET\n");
+		writeFileSync(join(home, ".env"), "SECRET\n");
+		writeFileSync(join(root, "plain.txt"), "plain\n");
+		symlinkSync(join(home, ".ssh"), join(root, "keys"));
+		// read は無い名前を別表記で探し直す。まっすぐな引用符で訊くと、曲がった引用符の symlink が開く。
+		symlinkSync(join(home, ".ssh", "id_test"), join(root, "it\u2019s"));
+		const app = extensionHost();
+		guard(app.pi);
+		app.ctx.cwd = root;
+		await app.emit("session_start");
+		for (const name of ["grep", "find", "ls"]) app.tools.push({ name, sourceInfo: { source: "builtin", path: `builtin:${name}` } });
+		// ~/.aws は無い。無くても数える。
+		const denied = ["~/.env", "~/.ssh", "~/.ssh/id_test", "../.ssh/id_test", "keys/id_test", "keys", "@~/.zshenv", `file://${home}/.netrc`, "~/.aws/credentials"];
+		const tools = ["read", "grep", "find", "ls", "edit"];
+		for (const mode of ["normal", "ask", "readonly"]) {
+			await app.command("permissions", mode);
+			for (const toolName of mode === "readonly" ? tools.slice(0, 4) : tools) {
+				for (const path of denied) {
+					const asked = app.confirmations.length;
+					app.approve(false);
+					const result = await app.emit("tool_call", call(toolName, { path })) as { block: boolean; reason: string };
+					assert.equal(result?.block, true, `${mode} ${toolName} ${path}`);
+					assert.match(result.reason, /guard\[read-denied\]: denied by the user/);
+					app.approve(true);
+					assert.equal(await app.emit("tool_call", call(toolName, { path })), undefined);
+					assert.equal(app.confirmations.length, asked + 2);
+				}
+			}
+			app.approve(false);
+			assert.ok(blocked(await app.emit("tool_call", call("read", { path: "it's" }))));
+			const asked = app.confirmations.length;
+			// 隣の名前や普通のファイル、path を省いた検索には訊かない。
+			for (const path of ["plain.txt", "~/.sshrc", "~/.env.example", "~/.config/aws", undefined]) {
+				for (const toolName of tools.slice(1, 4)) assert.equal(await app.emit("tool_call", call(toolName, { path })), undefined, `${mode} ${toolName} ${path}`);
+			}
+			assert.equal(await app.emit("tool_call", call("read", { path: "plain.txt" })), undefined);
+			if (mode === "normal") assert.equal(await app.emit("tool_call", call("edit", { path: "plain.txt" })), undefined);
+			assert.equal(app.confirmations.length, asked);
+		}
+
+		await app.command("permissions", "normal");
+		app.ctx.hasUI = false;
+		const asked = app.confirmations.length;
+		for (const toolName of tools) {
+			const unasked = await app.emit("tool_call", call(toolName, { path: "keys/id_test" })) as { block: boolean; reason: string };
+			assert.equal(unasked?.block, true, toolName);
+			assert.match(unasked.reason, /guard\[read-denied\].*No user can be asked/);
+			assert.doesNotMatch(unasked.reason, /denied by the user/);
+		}
+		await app.command("permissions", "full");
+		for (const toolName of tools) assert.equal(await app.emit("tool_call", call(toolName, { path: "~/.ssh/id_test" })), undefined, toolName);
+		assert.equal(app.confirmations.length, asked);
+	} finally {
+		for (const name of [".ssh", ".env"]) rmSync(join(home, name), { recursive: true, force: true });
+	}
 });
 
 test("targetPath は動いている release の resolveToCwd と同じパスを返す", async () => {

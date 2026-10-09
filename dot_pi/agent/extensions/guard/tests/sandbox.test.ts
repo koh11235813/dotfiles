@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import guard from "../index.ts";
-import { bwrap, containsHome, EXTRA_WRITE_PATHS, gitCommonDir, inside, sandboxArgv, sandboxAvailable, seatbelt, wrap, writeRoots } from "../sandbox.ts";
+import { bwrap, containsHome, EXTRA_WRITE_PATHS, gitCommonDir, inside, readDenied, sandboxArgv, sandboxAvailable, seatbelt, wrap, writeRoots } from "../sandbox.ts";
 import { extensionHost } from "../../../tests/extension-host.ts";
 
 // 本物の HOME と一時ディレクトリを root にしない。os.tmpdir() の下に作った「外」が外でなくなる。
@@ -89,7 +89,7 @@ test("まだ無いパスは一番近い祖先で判定し、外を指すsymlink�
 });
 
 test("seatbeltは書き込みだけを拒否してrootsを再許可し、パスの引用符を逃がす", () => {
-	const profile = seatbelt(["/work/project", '/odd/"quoted"\\dir']);
+	const profile = seatbelt(["/work/project", '/odd/"quoted"\\dir'], []);
 	assert.match(profile, /^\(version 1\)\n\(allow default\)\n\(deny file-write\*\)\n\(allow file-write\*\n/);
 	assert.ok(profile.includes('(subpath "/work/project")'));
 	assert.ok(profile.includes('(subpath "/odd/\\"quoted\\"\\\\dir")'));
@@ -98,7 +98,7 @@ test("seatbeltは書き込みだけを拒否してrootsを再許可し、パス�
 });
 
 test("bwrapは/を読み取り専用にしてrootsだけ書けるように重ね、ネットワークは切り離さない", () => {
-	assert.deepEqual(bwrap(["/work/project", "/tmp"]), [
+	assert.deepEqual(bwrap(["/work/project", "/tmp"], []), [
 		"--ro-bind", "/", "/",
 		"--bind-try", "/work/project", "/work/project",
 		"--bind-try", "/tmp", "/tmp",
@@ -112,10 +112,10 @@ test("bwrapは/を読み取り専用にしてrootsだけ書けるように重ね
 });
 
 test("sandboxの実体は絶対パスで呼び、PATHからは探さない。対応していないOSには無い", () => {
-	assert.equal(sandboxArgv([], "darwin")?.[0], "/usr/bin/sandbox-exec");
+	assert.equal(sandboxArgv([], [], "darwin")?.[0], "/usr/bin/sandbox-exec");
 	// bubblewrap が無いホスト (macOS) では無し。
-	assert.equal(sandboxArgv([], "linux")?.[0], ["/usr/bin/bwrap", "/bin/bwrap"].find((path) => existsSync(path)));
-	assert.equal(sandboxArgv([], "win32"), undefined);
+	assert.equal(sandboxArgv([], [], "linux")?.[0], ["/usr/bin/bwrap", "/bin/bwrap"].find((path) => existsSync(path)));
+	assert.equal(sandboxArgv([], [], "win32"), undefined);
 });
 
 test("モデルのコマンドはシェル文字列に埋めず環境変数で渡す", () => {
@@ -124,6 +124,56 @@ test("モデルのコマンドはシェル文字列に埋めず環境変数で�
 	assert.equal(wrapped.command, `exec 'sandbox' '-p' 'it'\\''s (a) profile' /bin/bash -c "$PI_GUARD_COMMAND"`);
 	assert.deepEqual(wrapped.env, { KEEP: "1", PI_GUARD_COMMAND: command });
 	assert.equal(wrapped.cwd, "/work");
+});
+
+test("読ませない場所は無くても数え、symlinkならリンク先も数える", () => {
+	const home = process.env.HOME!;
+	// この時点では .ssh も .env も .zshenv も無い。
+	assert.deepEqual(readDenied(), [".ssh", ".env", ".zshenv", ".aws", ".netrc"].map((name) => join(home, name)));
+	symlinkSync(dir("denied", "aws"), join(home, ".aws"));
+	try {
+		assert.deepEqual(readDenied().slice(3), [join(home, ".aws"), join(base, "denied", "aws"), join(home, ".netrc")]);
+	} finally {
+		rmSync(join(home, ".aws"));
+	}
+});
+
+test("読ませない場所と重なるrootは書ける場所にしない", () => {
+	const home = process.env.HOME!;
+	const inner = dir("home", ".ssh", "project");
+	const outer = dir("denied", "outer");
+	symlinkSync(dir("denied", "outer", "deep", "netrc"), join(home, ".netrc"));
+	try {
+		assert.ok(!writeRoots("normal", inner, "").includes(inner));
+		assert.ok(!writeRoots("normal", outer, "").includes(outer));
+		assert.deepEqual(writeRoots("readonly", "", inner), []);
+	} finally {
+		rmSync(join(home, ".netrc"));
+		rmSync(join(home, ".ssh"), { recursive: true });
+	}
+});
+
+test("seatbeltは読ませない場所の拒否を最後に置き、入口のstatだけ戻す", () => {
+	const profile = seatbelt(["/work/project"], ["/home/me/.ssh", '/home/me/.e"nv']).split("\n");
+	assert.deepEqual(profile.slice(-2), [
+		'(deny file-read* (subpath "/home/me/.ssh") (subpath "/home/me/.e\\"nv"))',
+		'(allow file-read-metadata (literal "/home/me/.ssh") (literal "/home/me/.e\\"nv"))',
+	]);
+	assert.ok(profile.indexOf('\t(subpath "/work/project")') < profile.length - 2);
+});
+
+test("bwrapは読ませない場所をrootsの後で隠し、実在しないものとsymlinkのままの名前は飛ばす", () => {
+	const directory = dir("hide", "dir");
+	const file = join(dir("hide"), "file");
+	writeFileSync(file, "secret\n");
+	const link = join(base, "hide", "link");
+	symlinkSync(directory, link);
+	assert.deepEqual(bwrap(["/work/project"], [directory, file, link, join(base, "hide", "missing")]).slice(0, 11), [
+		"--ro-bind", "/", "/",
+		"--bind-try", "/work/project", "/work/project",
+		"--tmpfs", directory,
+		"--ro-bind", "/dev/null", file,
+	]);
 });
 
 // Linux は bubblewrap が動くホストでだけ走る。macOS で probe が失敗するなら、それは見逃さず落とす。
@@ -198,13 +248,60 @@ test("bashツールは実際のsandboxの中で走り、モードごとに書け
 	assert.equal((await run(`echo out > ${outside}/full.txt`)).ok, true);
 });
 
+test("full以外のbashは読ませない場所を読めず、ほかの読み取りはそのまま通る", { skip: cannotRun }, async () => {
+	const home = process.env.HOME!;
+	const root = dir("home", "deny-project");
+	const target = dir("deny", "target");
+	const secrets = [join(dir("home", ".ssh"), "id_test"), join(home, ".env"), join(home, ".zshenv"), join(target, "credentials")];
+	try {
+		for (const path of secrets) writeFileSync(path, "SECRET\n");
+		// リンク先が HOME の外にある。
+		symlinkSync(target, join(home, ".aws"));
+		writeFileSync(join(home, "notes.txt"), "plain\n");
+		symlinkSync(join(home, ".ssh"), join(root, "keys"));
+		const app = extensionHost();
+		guard(app.pi);
+		app.ctx.cwd = root;
+		await app.emit("session_start");
+		const bash = app.registeredTools.get("bash")!;
+		const run = async (command: string): Promise<{ ok: boolean; text: string }> => {
+			const result = await bash.execute("call-1", { command }, undefined, undefined, app.ctx);
+			return { ok: !result.isError, text: result.content[0].text };
+		};
+		const routes = [
+			"cat ~/.ssh/id_test", "cat ~/.env", "cat ~/.zshenv", "cat ~/.ssh/../.zshenv", "cat keys/id_test", "cat ~/.aws/credentials", `cat ${target}/credentials`,
+			"cp ~/.env copy.txt; cat copy.txt", "ls ~/.ssh", "grep -r SECRET ~/.ssh ~/.env ~/.zshenv ~/.aws",
+		];
+		for (const mode of ["normal", "ask", "readonly"]) {
+			await app.command("permissions", mode);
+			for (const command of routes) {
+				const result = await run(command);
+				assert.doesNotMatch(result.text, /SECRET/, `${mode}: ${command}`);
+				// bubblewrap ではファイルが /dev/null に見え、読むと空で成功する。
+				if (process.platform === "darwin" || command.includes("id_test") || command.includes("credentials")) assert.equal(result.ok, false, `${mode}: ${command}`);
+			}
+			assert.deepEqual((await run("ls -la ~ > /dev/null && ls -A ~ && cat ~/notes.txt")).text.split("\n").filter((name) => /^(\.ssh|\.env|\.zshenv|\.aws|plain)$/.test(name)), [".aws", ".env", ".ssh", ".zshenv", "plain"], mode);
+		}
+		// 隠したのは sandbox の中の見え方だけで、実物は残っている。
+		for (const path of secrets) assert.equal(readFileSync(path, "utf8"), "SECRET\n");
+		await app.emit("session_shutdown");
+		await app.command("permissions", "full");
+		for (const command of routes.slice(0, 7)) assert.equal((await run(command)).text, "SECRET\n", command);
+	} finally {
+		for (const name of [".ssh", ".env", ".zshenv", ".aws"]) rmSync(join(home, name), { recursive: true, force: true });
+	}
+});
+
 test("normalでは/tmpと/var/tmpに書け、readonlyでは書けない", { skip: cannotRun }, async () => {
 	EXTRA_WRITE_PATHS.unshift(...sharedTmp);
 	const shared = ["/tmp", "/var/tmp"].map((path) => mkdtempSync(join(path, "guard-shared-")));
+	// Linux ではテスト用の HOME が /tmp の下にある。読ませない場所を含む /tmp が書ける場所から外れるので、よそへ向ける。
+	const home = process.env.HOME;
+	process.env.HOME = "/nonexistent";
 	try {
 		const root = dir("shared", "project");
-		const roots = writeRoots("normal", root, "");
-		assert.ok(roots.includes(realpathSync("/tmp")) && roots.includes(realpathSync("/var/tmp")), roots.join(" "));
+		// Linux では root も一時ディレクトリも /tmp の中にあり、/tmp に畳まれて並びが変わる。
+		for (const path of ["/tmp", "/var/tmp"]) assert.ok(writeRoots("normal", root, "").includes(realpathSync(path)), path);
 		const app = extensionHost();
 		guard(app.pi);
 		app.ctx.cwd = root;
@@ -220,6 +317,7 @@ test("normalでは/tmpと/var/tmpに書け、readonlyでは書けない", { skip
 		assert.deepEqual(await write(), [false, false]);
 		await app.emit("session_shutdown");
 	} finally {
+		process.env.HOME = home;
 		EXTRA_WRITE_PATHS.splice(0, 2);
 		for (const path of shared) rmSync(path, { recursive: true, force: true });
 	}
