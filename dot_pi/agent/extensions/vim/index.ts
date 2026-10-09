@@ -12,7 +12,7 @@
  * 端の行での `j` `k` (入力履歴)、Ctrl つきのキーや矢印、貼り付け。
  */
 
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { decodeKittyPrintable, isKeyRelease, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { ESC, graphemes, type Outcome, type Position, Vim } from "./vim.ts";
 
@@ -50,10 +50,23 @@ function printableKeys(data: string): string[] | undefined {
 	return /[\x00-\x1f\x7f]/.test(data) ? undefined : graphemes(data);
 }
 
+const DRAFT_ENTRY = "vim-draft";
+type Draft = { text: string };
+
+/** 不明な版や壊れたデータは保存スロットとして採用しない。null は復元済みの記録。 */
+function readDraft(data: unknown): Draft | null | undefined {
+	if (typeof data !== "object" || data === null || !("version" in data) || data.version !== 1 || !("text" in data)) return undefined;
+	if (data.text === null) return null;
+	return typeof data.text === "string" && data.text.trim() ? { text: data.text } : undefined;
+}
+
 interface Host {
+	isActive: (editor: VimEditor) => boolean;
+	saveDraft: (draft: Draft | undefined) => void;
 	/** エージェントが応答中でないか。 */
 	isIdle: () => boolean;
 	warn: (message: string) => void;
+	setDraftStatus: (message: string | undefined) => void;
 }
 
 /**
@@ -63,15 +76,119 @@ interface Host {
 class VimEditor extends CustomEditor {
 	#vim = new Vim();
 	#host: Host;
+	#draft: Draft | undefined;
+	#pendingSubmissions = 0;
+	#restoreRequested: Draft | undefined;
 
-	constructor(host: Host, ...args: ConstructorParameters<typeof CustomEditor>) {
+	constructor(host: Host, draft: Draft | undefined, restoreRequested: boolean, ...args: ConstructorParameters<typeof CustomEditor>) {
 		super(...args);
 		this.#host = host;
+		this.#draft = draft;
+		if (restoreRequested) this.#restoreRequested = draft;
+	}
+
+	#isActive(): boolean {
+		// 別のエディタやダイアログにフォーカスが移った後の非同期完了は入力を変えない。
+		return this.#host.isActive(this) && this.focused;
+	}
+
+	#restoreAfterSubmit(text: string, draft: Draft): void {
+		// 同じ本文を保存し直した場合も、古い送信の完了では消費しない。
+		if (!this.#host.isActive(this) || !text.trim() || this.#draft !== draft) return;
+		this.#restoreRequested = draft;
+		this.#retryRestore();
+	}
+
+	#retryRestore(): void {
+		const draft = this.#restoreRequested;
+		if (draft === undefined || this.#draft !== draft || !this.#isActive() || this.getText() !== "") return;
+		this.#restoreDraft(draft);
+	}
+
+	#restoreDraft(draft: Draft): void {
+		// どの送信も完了前に入力を消しうる。手動復元や followUp でも保存スロットを先に消費しない。
+		if (this.#pendingSubmissions > 0) return;
+		this.setText(draft.text);
+		this.#host.saveDraft(undefined);
+		this.#draft = undefined;
+		this.#restoreRequested = undefined;
+		this.#vim = new Vim();
+		this.#host.setDraftStatus(undefined);
+		this.tui.requestRender();
+	}
+
+	#trackSubmission(text: string, submit: () => void): void | Promise<void> {
+		if (!text.trim()) return submit();
+		const draft = this.#draft;
+		// 退避前に始まった送信も、あとから保存した下書きの復元を止める。
+		// 待機中の followUp は onSubmit を呼ぶ。両方を数え、最後の完了だけが復元する。
+		this.#pendingSubmissions++;
+		let result: ReturnType<typeof submit>;
+		try {
+			result = submit();
+		} catch (error) {
+			this.#pendingSubmissions--;
+			throw error;
+		}
+		// SDK の型は void だが、onSubmit と followUp は実行時に Promise を返す。
+		return Promise.resolve(result).finally(() => {
+			this.#pendingSubmissions--;
+		}).then(() => {
+			if (draft !== undefined) this.#restoreAfterSubmit(text, draft);
+			this.#retryRestore();
+		}).catch((error: unknown) => {
+			try {
+				if (this.#isActive()) this.#host.warn(`vim: 送信後の下書き復元に失敗しました: ${String(error)}`);
+			} catch {
+				// 古い ctx への通知が失敗しても、未処理の Promise rejection を作らない。
+			}
+		});
 	}
 
 	handleInput(data: string): void {
+		if (!this.#isActive()) return;
+		// コールバックは factory が返ったあとで Pi が設定する。/export や応答中の拡張コマンドは
+		// 非同期処理のあとで入力を消すので、input イベントでなく正常完了まで復元を待つ。
+		const submit = this.onSubmit;
+		const followUp = this.actionHandlers.get("app.message.followUp");
+		const wrappedSubmit = submit ? (text: string) => this.#trackSubmission(text, () => submit(text)) : undefined;
+		const wrappedFollowUp = followUp ? () => this.#trackSubmission(this.getExpandedText(), followUp) : undefined;
+		if (wrappedSubmit) this.onSubmit = wrappedSubmit;
+		if (wrappedFollowUp) this.actionHandlers.set("app.message.followUp", wrappedFollowUp);
+		try {
+			this.#handleInput(data);
+		} finally {
+			if (wrappedSubmit && this.onSubmit === wrappedSubmit) this.onSubmit = submit;
+			if (followUp && this.actionHandlers.get("app.message.followUp") === wrappedFollowUp) {
+				this.actionHandlers.set("app.message.followUp", followUp);
+			}
+		}
+	}
+
+	#handleInput(data: string): void {
 		// Pi は離す側のイベントを普通は届けないが、届くと Esc が 2 回押されたことになる。
 		if (isKeyRelease(data)) return;
+
+		if (matchesKey(data, "ctrl+s")) {
+			const text = this.getExpandedText();
+			if (this.#draft !== undefined) {
+				if (text.trim()) {
+					this.#host.warn("vim: 下書きは保存済みです。入力欄を空にしてから Ctrl+S で復元してください。");
+					return;
+				}
+				this.#restoreDraft(this.#draft);
+				return;
+			}
+			if (!text.trim()) return;
+			const draft = { text };
+			this.#host.saveDraft(draft);
+			this.#draft = draft;
+			this.setText("");
+			this.#vim = new Vim();
+			this.#host.setDraftStatus("Draft saved");
+			this.tui.requestRender();
+			return;
+		}
 
 		if (matchesKey(data, "escape")) {
 			// 補完メニューが出ている間の Esc はメニューを閉じるだけ。Pi に渡してモードは変えない。
@@ -96,6 +213,8 @@ class VimEditor extends CustomEditor {
 	}
 
 	render(width: number): string[] {
+		// selector の終了と reload 後のフォーカス復帰は render 境界で拾う。タイマーは不要。
+		this.#retryRestore();
 		const lines = super.render(width);
 		// 補完メニューは下枠の下に描かれる。最終行が枠でないので、表示を載せるとメニューを潰す。
 		if (lines.length === 0 || this.isShowingAutocomplete()) return lines;
@@ -166,9 +285,40 @@ class VimEditor extends CustomEditor {
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_start", (_event, ctx) => {
+	let generation = 0;
+	let activeEditor: VimEditor | undefined;
+	pi.on("session_shutdown", () => {
+		generation++;
+		activeEditor = undefined;
+	});
+	const restoreEditor = (ctx: ExtensionContext, afterReload = false) => {
+		const currentGeneration = ++generation;
+		const sessionId = ctx.sessionManager.getSessionId();
+		let draft: Draft | undefined;
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "custom" || entry.customType !== DRAFT_ENTRY) continue;
+			const saved = readDraft(entry.data);
+			if (saved !== undefined) draft = saved ?? undefined;
+		}
+		const restoreRequested = afterReload && draft !== undefined;
+		let expandedText: string | undefined;
+		try {
+			expandedText = ctx.ui.getEditorText();
+		} catch {
+			// UI がまだ入力欄を作っていない場合は Pi の初期値を使う。
+		}
 		const host: Host = {
-			// セッションの切り替えや /reload のあと、古い ctx は触ると例外を投げる。次の session_start で
+			isActive: (editor) => {
+				try {
+					if (generation !== currentGeneration || activeEditor !== editor || ctx.sessionManager.getSessionId() !== sessionId) return false;
+					ctx.isIdle(); // /reload で無効になった ctx も検出する。
+					return true;
+				} catch {
+					return false;
+				}
+			},
+			saveDraft: (saved) => pi.appendEntry(DRAFT_ENTRY, { version: 1, text: saved?.text ?? null }),
+			// セッションの切り替えや /reload のあと、古い ctx は触ると例外を投げる。次の session_start / session_tree で
 			// エディタごと作り直されるまでの間は、中断キーが残る側 (応答中扱い) に倒す。
 			isIdle: () => {
 				try {
@@ -178,7 +328,16 @@ export default function (pi: ExtensionAPI) {
 				}
 			},
 			warn: (message) => ctx.ui.notify(message, "warning"),
+			setDraftStatus: (message) => ctx.ui.setStatus("vim-draft", message),
 		};
-		ctx.ui.setEditorComponent((tui, theme, kb) => new VimEditor(host, tui, theme, kb));
-	});
+		ctx.ui.setEditorComponent((tui, theme, kb) => {
+			activeEditor = new VimEditor(host, draft, restoreRequested, tui, theme, kb);
+			return activeEditor;
+		});
+		// Pi の交換処理は getText() だけをコピーするため、paste の展開済み本文を後から戻す。
+		if (expandedText !== undefined) ctx.ui.setEditorText(expandedText);
+		host.setDraftStatus(draft ? "Draft saved" : undefined);
+	};
+	pi.on("session_start", (event, ctx) => restoreEditor(ctx, event.reason === "reload"));
+	pi.on("session_tree", (_event, ctx) => restoreEditor(ctx));
 }

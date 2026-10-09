@@ -1,21 +1,29 @@
 /**
  * compactjev — Jev-based log filter for Pi's compaction.
  *
- * Hooks `session_before_compact`. For every long tool output in the messages about to be
- * summarized (tool results and `!` bash executions), it asks TypeSafe's Jev classifier whether
- * each line is needed to understand what the command produced, given the user's goal. Each
- * output then keeps its highest-rated lines that fit a character budget, in original order;
- * each run of dropped lines is collapsed into a single marker and blank lines are dropped. The
- * handler returns nothing, so Pi's default LLM summarization runs on the filtered messages.
+ * Hooks `session_before_compact`. For every long tool result in the messages about to be
+ * summarized, it asks TypeSafe's Jev classifier whether each line is needed to understand what
+ * the command produced, given the user's goal. Each result then keeps its highest-rated lines
+ * that fit a character budget, in original order; a line too long for what is left of the budget
+ * is cut to fit, each run of dropped lines is collapsed into a single marker and blank lines are
+ * dropped. The handler returns nothing, so Pi's default LLM summarization runs on the filtered
+ * messages.
  *
  * Lines are picked by rank, not by a probability threshold: Jev ranks outcome lines above
  * progress noise, but its absolute probabilities for the two overlap.
  *
+ * The goal is the `/goal` text (the goal extension's last "goal" entry on the branch) followed by
+ * the `/compact` instructions. The last user message is only a fallback when both are empty: it
+ * is the last one in the span being discarded, not the current request, and is often "continue".
+ *
  * Tool results: Pi's summarizer only sees the first 2000 characters of each, so progress noise at
  * the head of a log pushes the errors at its tail out of the summary; the budget makes the whole
  * filtered result fit inside that cut.
- * Bash executions: Pi does not truncate these; the same budget only keeps the summarizer's input
- * small.
+ *
+ * Whatever Pi's own cut would serve better is left to it:
+ * - `!` bash executions: Pi passes these to the summarizer whole, so any filter only loses text.
+ * - Results of `read`, `grep`, `find` and `ls`: see READER_TOOLS.
+ * - A result with a failed or incomplete Jev request: see scoreBatch.
  *
  * Providers are tried in order until one has usable credentials:
  *   typesafe/jev-latest, openrouter/~typesafe/jev-latest,
@@ -41,6 +49,11 @@ const JEV_CANDIDATES: Array<[string, string]> = [
 const MIN_LOG_CHARS = 2000;
 /** Characters of kept lines per tool output; the rest of MIN_LOG_CHARS is left for the markers. */
 const KEEP_CHARS = 1800;
+/** A cut line shorter than this says too little to be worth its marker. */
+const MIN_CUT_CHARS = 200;
+/** Builtin tools whose result is file content or a path list, not a command's log: the Jev question
+ * has no outcome lines to find there, and scattered lines read worse than Pi's contiguous head. */
+const READER_TOOLS = new Set(["read", "grep", "find", "ls"]);
 /** Characters of the user's goal sent to Jev. */
 const GOAL_MAX_CHARS = 1000;
 /** Characters of the rendered command sent to Jev. */
@@ -57,15 +70,15 @@ const MAX_SCORED_LINES = 3000;
 /** One text block of a tool output, split into lines. */
 interface LogBlock {
 	lines: string[];
-	/** Keep-probability per line; 1 until Jev scores it, so unscored lines rank first. */
+	/** Keep-probability per line, once Jev has scored it. */
 	probabilities: number[];
 	kept: boolean[];
 }
 
-/** A long tool output selected for filtering. */
+/** A long tool result selected for filtering. */
 interface LogTarget {
 	command: string;
-	/** Text blocks by content index (0 for a bash execution's `output`). */
+	/** Text blocks by content index. */
 	blocks: Map<number, LogBlock>;
 	batches: number;
 	failed: number;
@@ -90,6 +103,17 @@ function findJev(ctx: ExtensionContext): ClassifierModel<ClassifierApi> | undefi
 function textOf(content: string | Array<{ type: string; text?: string }>): string {
 	if (typeof content === "string") return content;
 	return content.flatMap((block) => (block.type === "text" && block.text !== undefined ? [block.text] : [])).join("\n");
+}
+
+/** The text of the last `/goal` entry on the branch; "" when none was set or it was cleared. */
+export function readGoal(entries: SessionBeforeCompactEvent["branchEntries"]): string {
+	let goal = "";
+	for (const entry of entries) {
+		if (entry.type !== "custom" || entry.customType !== "goal") continue;
+		const data = entry.data as { version?: unknown; text?: unknown } | undefined;
+		if (data?.version === 1 && typeof data.text === "string") goal = data.text.trim();
+	}
+	return goal;
 }
 
 function lastUserText(messages: AgentMessage[]): string {
@@ -123,14 +147,7 @@ function selectTargets(messages: AgentMessage[]): Map<AgentMessage, LogTarget> {
 	const commands = renderToolCalls(messages);
 	const targets = new Map<AgentMessage, LogTarget>();
 	for (const m of messages) {
-		if (m.role === "bashExecution" && m.output.length > MIN_LOG_CHARS) {
-			targets.set(m, {
-				command: m.command.slice(0, COMMAND_MAX_CHARS),
-				blocks: new Map([[0, toBlock(m.output)]]),
-				batches: 0,
-				failed: 0,
-			});
-		} else if (m.role === "toolResult") {
+		if (m.role === "toolResult" && !READER_TOOLS.has(m.toolName)) {
 			const total = m.content.reduce((n, c) => n + (c.type === "text" ? c.text.length : 0), 0);
 			if (total <= MIN_LOG_CHARS) continue;
 			const blocks = new Map<number, LogBlock>();
@@ -193,13 +210,16 @@ async function scoreBatch(
 		{ state: { goal, command: batch.target.command, lines }, questions },
 		{ signal },
 	);
-	// A failed batch leaves its probabilities at 1: an unscored line might be the error itself.
+	// Not ok means the target is left unfiltered: its unscored lines would sit at probability 1,
+	// outrank every scored line and take the budget.
 	if (result.stopReason !== "stop") return { ok: false, error: result.errorMessage ?? result.stopReason };
+	let unanswered = 0;
 	batch.lines.forEach(({ block, index }, i) => {
 		const answer = result.answers[`l${i}`];
 		if (answer?.type === "bool") block.probabilities[index] = answer.probability;
+		else unanswered++;
 	});
-	return { ok: true };
+	return unanswered ? { ok: false, error: `no answer for ${unanswered}/${batch.lines.length} lines` } : { ok: true };
 }
 
 /** Keep the highest-ranked lines within KEEP_CHARS, then trim until the collapsed text fits MIN_LOG_CHARS. */
@@ -207,10 +227,22 @@ function selectLines(target: LogTarget): void {
 	const ranked = nonBlankLines(target).sort((a, b) => b.block.probabilities[b.index] - a.block.probabilities[a.index]);
 	let budget = KEEP_CHARS;
 	for (const { block, index } of ranked) {
-		const cost = block.lines[index].length + 1;
-		if (cost > budget) continue;
+		const line = block.lines[index];
 		block.kept[index] = true;
-		budget -= cost;
+		if (line.length + 1 <= budget) {
+			budget -= line.length + 1;
+			continue;
+		}
+		// Skipping it instead would wipe a result that is one long line, where Pi keeps its head.
+		const marker = ` [… ${line.length} chars dropped by compactjev]`;
+		const room = budget - 1 - marker.length;
+		if (room < MIN_CUT_CHARS) {
+			// Shorter lines further down the ranking may still fit.
+			block.kept[index] = false;
+			continue;
+		}
+		block.lines[index] = `${line.slice(0, room)} [… ${line.length - room} chars dropped by compactjev]`;
+		break;
 	}
 	// Markers are only known after collapsing, so the budget alone cannot guarantee the fit.
 	const kept = ranked.filter(({ block, index }) => block.kept[index]);
@@ -247,10 +279,6 @@ function collapse(block: LogBlock): { text: string; dropped: number } {
 /** A filtered copy of the message, or the original object when its text is unchanged. */
 function rebuild(m: AgentMessage, target: LogTarget): { message: AgentMessage; dropped: number } {
 	let dropped = 0;
-	if (m.role === "bashExecution") {
-		const filtered = collapse(target.blocks.get(0)!);
-		return filtered.text === m.output ? { message: m, dropped } : { message: { ...m, output: filtered.text }, dropped: filtered.dropped };
-	}
 	if (m.role !== "toolResult") return { message: m, dropped };
 	let changed = false;
 	const content = m.content.map((c, i) => {
@@ -276,7 +304,6 @@ interface TargetStats {
 
 /** Characters of the text the summarizer serializes for a tool output. */
 function textLength(m: AgentMessage): number {
-	if (m.role === "bashExecution") return m.output.length;
 	if (m.role !== "toolResult") return 0;
 	return m.content.reduce((n, c) => n + (c.type === "text" ? c.text.length : 0), 0);
 }
@@ -305,7 +332,8 @@ export default function (pi: ExtensionAPI) {
 
 		try {
 			const all = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
-			const goal = (event.customInstructions?.trim() || lastUserText(all)).slice(0, GOAL_MAX_CHARS);
+			const stated = [readGoal(event.branchEntries), event.customInstructions?.trim()].filter(Boolean).join("\n");
+			const goal = (stated || lastUserText(all)).slice(0, GOAL_MAX_CHARS);
 			const targets = selectTargets(all);
 			const batches = planBatches(targets.values());
 			if (batches.length === 0) return undefined;
@@ -337,8 +365,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`compactjev: all ${batches.length} Jev requests failed (${firstError}) — compacting without log filter`, "warning");
 				return undefined;
 			}
-			// A target none of whose batches scored would be cut by original order alone.
-			const scoredTargets = new Set(batches.map((b) => b.target).filter((t) => t.failed < t.batches));
+			const scoredTargets = new Set(batches.map((b) => b.target).filter((t) => t.failed === 0));
 			for (const target of scoredTargets) selectLines(target);
 
 			const stats: TargetStats[] = [];
@@ -363,7 +390,7 @@ export default function (pi: ExtensionAPI) {
 			preparation.messagesToSummarize.splice(0, preparation.messagesToSummarize.length, ...summarize);
 			preparation.turnPrefixMessages.splice(0, preparation.turnPrefixMessages.length, ...prefix);
 
-			const failures = failed ? `, ${failed}/${batches.length} Jev requests failed (their lines kept): ${firstError}` : "";
+			const failures = failed ? `, ${failed}/${batches.length} Jev requests failed: ${firstError}` : "";
 			const unscored = targets.size - scoredTargets.size;
 			const skipped = unscored ? `, ${unscored} tool outputs left unfiltered` : "";
 			ctx.ui.notify(formatStats(stats, `${failures}${skipped}`), "info");
