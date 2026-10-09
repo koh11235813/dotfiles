@@ -6,6 +6,7 @@ export function extensionHost() {
 	const handlers = new Map<string, Function[]>();
 	const commands = new Map<string, { handler: Function }>();
 	const shortcuts = new Map<string, { handler: Function }>();
+	const registeredTools = new Map<string, { name: string; execute: Function }>();
 	const notices: string[] = [];
 	const widgets = new Map<string, string[] | undefined>();
 	const statuses = new Map<string, string | undefined>();
@@ -37,12 +38,13 @@ export function extensionHost() {
 			return () => handlers.set(name, list.filter((item) => item !== handler));
 		},
 		registerCommand: (name: string, command: { handler: Function }) => { commands.set(name, command); },
+		registerTool: (tool: { name: string; execute: Function }) => { registeredTools.set(tool.name, tool); },
 		registerShortcut: (key: string, shortcut: { handler: Function }) => { shortcuts.set(key, shortcut); },
 		appendEntry: (type: string, data: unknown) => manager.appendCustomEntry(type, data),
 		getAllTools: () => tools,
 	} as unknown as ExtensionAPI;
 	return {
-		pi, ctx, notices, widgets, statuses, confirmations, commands, shortcuts, tools,
+		pi, ctx, notices, widgets, statuses, confirmations, commands, shortcuts, tools, registeredTools,
 		resetRuntime: () => { handlers.clear(); commands.clear(); shortcuts.clear(); },
 		get manager() { return manager; },
 		replaceSession: (next = SessionManager.inMemory(process.cwd())) => { manager = next; },
