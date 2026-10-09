@@ -72,7 +72,7 @@ Code comments: Why not
 
 ---
 
-# 5. Things to Consider
+## 5. Things to Consider
 
 Be honest. State conclusions and evidence plainly, point out errors, and question my assumptions and blind spots.
 Do not flatter me or soften a wrong conclusion.

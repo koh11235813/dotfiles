@@ -170,11 +170,17 @@
   "language": "Japanese",
   "effortLevel": "xhigh",
   "modelSettings": {
+    "claude-haiku-5-5": {
+      "effortLevel": "medium"
+    },
+    "claude-sonnet-5-5": {
+      "effortLevel": "medium"
+    },
     "claude-opus-5": {
       "effortLevel": "medium"
     },
     "claude-opus-5-5": {
-      "effortLevel": "high"
+      "effortLevel": "medium"
     },
     "claude-fable-5": {
       "effortLevel": "high"
