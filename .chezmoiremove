@@ -1,0 +1,2 @@
+# compactjev/index.ts に移した。残すと Pi が両方を読み、ハンドラが二重に登録される。
+.pi/agent/extensions/compactjev.ts
