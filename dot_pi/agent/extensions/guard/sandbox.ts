@@ -47,9 +47,12 @@ export function gitCommonDir(root: string): string | undefined {
  * root の外で書き込みを許す場所。root の中で作業していても道具が黙って書く先だけを並べる。
  * 無いパスは飛ばす。`~` そのものや、シェルの rc・`~/.ssh`・`~/.pi` を含む場所は足さない
  * (次に sandbox の外で動くものを書き換えられると境界の意味が無くなる)。
- * `/tmp` も入れていない。macOS では全ユーザー共有で、一時ファイルは os.tmpdir() で足りる。
  */
 export const EXTRA_WRITE_PATHS: Array<() => string | undefined> = [
+	// モデルが一時ファイルの置き場として知っているのはこの 2 つで、$TMPDIR (macOS では /var/folders 配下) は使ってくれない。
+	// 全ユーザー共有の場所だが、開けないと `/tmp/x` と決め打ちしたコマンドが軒並み失敗する。
+	() => "/tmp",
+	() => "/var/tmp",
 	// XDG のキャッシュ。pip, uv, pnpm, go build (Linux), mise などが実行のたびに書く。
 	() => join(homedir(), ".cache"),
 	// npm install / npx のキャッシュとログ。
@@ -127,7 +130,7 @@ export function seatbelt(roots: string[]): string {
 		'\t(regex #"^/dev/fd/")',
 		'\t(regex #"^/dev/ttys[0-9]+$")',
 		// macOS の /bin/bash (3.2) はヒアドキュメントの一時ファイルを TMPDIR を見ずに /var/tmp へ作る。
-		// /var/tmp ごと開けると readonly が読み取り専用でなくなるので、その名前だけ通す。
+		// readonly では /var/tmp を開けていないので、その名前だけ通す。
 		'\t(literal "/private/var/tmp")',
 		'\t(regex #"^/private/var/tmp/sh-thd-[0-9]+$"))',
 	].join("\n");

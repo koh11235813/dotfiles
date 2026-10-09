@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import guard from "../index.ts";
-import { bwrap, containsHome, gitCommonDir, inside, sandboxArgv, sandboxAvailable, seatbelt, wrap, writeRoots } from "../sandbox.ts";
+import { bwrap, containsHome, EXTRA_WRITE_PATHS, gitCommonDir, inside, sandboxArgv, sandboxAvailable, seatbelt, wrap, writeRoots } from "../sandbox.ts";
 import { extensionHost } from "../../../tests/extension-host.ts";
 
 // 本物の HOME と一時ディレクトリを root にしない。os.tmpdir() の下に作った「外」が外でなくなる。
+// 表の /tmp と /var/tmp も同じ理由で外す (Linux では os.tmpdir() が /tmp)。中身は専用のテストで戻して確かめる。
+const sharedTmp = EXTRA_WRITE_PATHS.splice(0, 2);
 const base = realpathSync(mkdtempSync(join(tmpdir(), "guard-sandbox-")));
 const dir = (...parts: string[]) => {
 	const path = join(base, ...parts);
@@ -194,4 +196,31 @@ test("bashツールは実際のsandboxの中で走り、モードごとに書け
 
 	await app.command("permissions", "full");
 	assert.equal((await run(`echo out > ${outside}/full.txt`)).ok, true);
+});
+
+test("normalでは/tmpと/var/tmpに書け、readonlyでは書けない", { skip: cannotRun }, async () => {
+	EXTRA_WRITE_PATHS.unshift(...sharedTmp);
+	const shared = ["/tmp", "/var/tmp"].map((path) => mkdtempSync(join(path, "guard-shared-")));
+	try {
+		const root = dir("shared", "project");
+		const roots = writeRoots("normal", root, "");
+		assert.ok(roots.includes(realpathSync("/tmp")) && roots.includes(realpathSync("/var/tmp")), roots.join(" "));
+		const app = extensionHost();
+		guard(app.pi);
+		app.ctx.cwd = root;
+		await app.emit("session_start");
+		const bash = app.registeredTools.get("bash")!;
+		const write = async (): Promise<boolean[]> => {
+			const results = [];
+			for (const path of shared) results.push(!(await bash.execute("call-1", { command: `echo x >> ${path}/file.txt` }, undefined, undefined, app.ctx)).isError);
+			return results;
+		};
+		assert.deepEqual(await write(), [true, true]);
+		await app.command("permissions", "readonly");
+		assert.deepEqual(await write(), [false, false]);
+		await app.emit("session_shutdown");
+	} finally {
+		EXTRA_WRITE_PATHS.splice(0, 2);
+		for (const path of shared) rmSync(path, { recursive: true, force: true });
+	}
 });

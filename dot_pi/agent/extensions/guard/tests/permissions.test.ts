@@ -6,13 +6,15 @@ import { join } from "node:path";
 import { test } from "node:test";
 import guard, { targetPath } from "../index.ts";
 import { PERMISSIONS_ENTRY } from "../permissions.ts";
-import { sandbox } from "../sandbox.ts";
+import { EXTRA_WRITE_PATHS, sandbox } from "../sandbox.ts";
 import { extensionHost } from "../../../tests/extension-host.ts";
 
 // SDK の場所。loader は HOME から release を探すので、下で HOME を差し替える前に解決しておく。
 const SDK = import.meta.resolve("@earendil-works/pi-coding-agent");
 
 // 本物の HOME と一時ディレクトリを root にしない。os.tmpdir() の下に作った「外」が外でなくなる。
+// 表の /tmp と /var/tmp も同じ理由で外す (Linux では os.tmpdir() が /tmp)。
+EXTRA_WRITE_PATHS.splice(0, 2);
 const base = realpathSync(mkdtempSync(join(tmpdir(), "guard-permissions-")));
 const dir = (...parts: string[]) => {
 	const path = join(base, ...parts);
