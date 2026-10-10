@@ -6,13 +6,17 @@
  *
  * - 規則表: `tool_call` を拾い、bash の command と edit / write の path を照らす。
  * - sandbox: 組み込みの bash を同名で差し替え、full 以外では書ける場所を root・一時ディレクトリ・
- *   EXTRA_WRITE_PATHS に絞る (readonly は専用の一時ディレクトリだけ)。`tool_call` で command を
- *   書き換えないのは、transcript と規則表にモデルが書いたままの command を残すため。
+ *   EXTRA_WRITE_PATHS に絞り (readonly は専用の一時ディレクトリだけ)、READ_DENIED_PATHS を読めなくする。
+ *   `tool_call` で command を書き換えないのは、transcript と規則表にモデルが書いたままの command を残すため。
  * - edit / write は Pi のプロセス内 (Node の fs) で動き sandbox の外なので、同じ場所の外への書き込みを
  *   ここで confirm にする。そうしないと write が sandbox の抜け道になる。
+ * - read / grep / find / ls / edit も同じ理由で、READ_DENIED_PATHS を指す呼び出しをここで confirm にする。
+ *   見るのは引数の path だけ。grep / find は rg / fd を `--hidden` で起動するので、親ディレクトリ (`~` など) を
+ *   渡されると中まで降りて読む。それはここでは止まらない。
  *
  * ユーザーが自分で打つ `!` コマンド (`user_bash`) は意図して sandbox に入れていない。人の操作まで絞る理由がない。
- * ほかに覆っていないもの: MCP や他の拡張のツール、Pi の外のプロセス、ネットワーク、読み取り。/permissions の ask / readonly がツールを読み取り専用と
+ * ほかに覆っていないもの: MCP や他の拡張のツール、Pi の外のプロセス、ネットワーク、READ_DENIED_PATHS 以外の読み取り、
+ * Pi が既に持っている環境変数 (sandbox の中の `env` で見える)。/permissions の ask / readonly がツールを読み取り専用と
  * みなす根拠は組み込み reader の出自と readOnlyHint で、実際の副作用は検証しない。
  *
  * confirm は UI が要る。subagent は子の Pi を `--mode json -p` で起動するので、その中では
@@ -30,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { createBashToolDefinition, type ExtensionAPI, type ExtensionContext, isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { GUARD_ENV, inheritedState, isPermissionMode, isPermissionState, judgePermission, PERMISSIONS_ENTRY, type PermissionMode, type PermissionState } from "./permissions.ts";
 import { BASH_RULES, chezmoiTarget, evaluate, PATH_RULES, type Rule } from "./rules.ts";
-import { containsHome, gitCommonDir, inside, sandboxArgv, sandboxAvailable, wrap, writeRoots } from "./sandbox.ts";
+import { containsHome, gitCommonDir, inside, READ_DENIED_PATHS, readDenied, sandboxArgv, sandboxAvailable, wrap, writeRoots } from "./sandbox.ts";
 
 /** ダイアログと通知に出す対象の上限。数十行のヒアドキュメントが画面を埋めないようにする。 */
 const SHOWN_LINES = 5;
@@ -85,6 +89,26 @@ function outsideRoots(roots: string[]): Rule {
 	};
 }
 
+/**
+ * read は無いパスを macOS の別表記 (スクリーンショット名の AM/PM 前の空白、NFD、曲がった引用符) で探し直す
+ * (path-utils.js の resolveReadPath)。元の名前だけで判定すると、cwd に別表記の名前で置いた symlink 越しに読める。
+ */
+function readVariants(path: string): string[] {
+	const nfd = path.normalize("NFD");
+	return [path, path.replace(/ (AM|PM)\./gi, "\u202F$1."), nfd, path.replace(/'/g, "\u2019"), nfd.replace(/'/g, "\u2019")];
+}
+
+/** 組み込み reader と edit の先が読ませない場所。sandbox の中の bash と同じ表で、こちらは人に訊ける。 */
+function readDeniedPath(denied: string[]): Rule {
+	return {
+		id: "read-denied",
+		decision: "confirm",
+		reason:
+			"This path holds credentials (SSH keys, tokens, shell secrets) and reading it needs the user's approval. Do not retry or route around this; sandboxed bash cannot read it either. Report what you needed from it.",
+		matches: (path) => readVariants(path).some((variant) => inside(denied, variant)),
+	};
+}
+
 export default function (pi: ExtensionAPI) {
 	const inherited = inheritedState(process.env[GUARD_ENV], process.pid);
 	let mode: PermissionMode = inherited?.mode ?? "normal";
@@ -131,7 +155,7 @@ export default function (pi: ExtensionAPI) {
 		createBashToolDefinition(process.cwd(), {
 			spawnHook: (context) => {
 				if (mode === "full") return context;
-				const argv = sandboxArgv(roots());
+				const argv = sandboxArgv(roots(), readDenied());
 				if (!argv) throw new Error(`guard[sandbox]: no OS sandbox on ${process.platform}.`);
 				const wrapped = wrap(context, argv);
 				if (mode === "readonly") wrapped.env.TMPDIR = scratch;
@@ -160,9 +184,9 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(
 				[
 					`Permissions: ${mode}${inherited ? " (inherited from the parent Pi session)" : ""}. Write root: ${containsHome(root) ? `none (${root} contains your home directory, so it is not writable; start Pi in a project directory)` : root}`,
-					"full: no sandbox. normal (default): the bash tool runs in an OS sandbox that can write only to the write root, the temp dir and a few caches; edit/write outside those need confirmation. ask: normal, plus confirmation for every tool that is not read-only. readonly: bash runs with a read-only filesystem (private TMPDIR only); edit/write and tools without a trusted readOnlyHint are blocked.",
+					`full: no sandbox. normal (default): the bash tool runs in an OS sandbox that can write only to the write root, the temp dir and a few caches; edit/write outside those need confirmation. Outside full, the sandbox cannot read ${READ_DENIED_PATHS.map((entry) => entry().replace(homedir(), "~")).join(", ")}, and read/grep/find/ls/edit on those paths need confirmation. ask: normal, plus confirmation for every tool that is not read-only. readonly: bash runs with a read-only filesystem (private TMPDIR only); edit/write and tools without a trusted readOnlyHint are blocked.`,
 					`Sandbox: ${mode === "full" ? "off" : sandboxAvailable() ? "available" : "UNAVAILABLE, bash is blocked"}. Fixed guard rules apply in every mode.`,
-					"Not covered: your own ! commands, MCP and other extension tools (readOnlyHint is not verified), processes outside Pi. Network and reads are not restricted. Mode is persisted per session and branch; subagents inherit it.",
+					"Not covered: your own ! commands, MCP and other extension tools (readOnlyHint is not verified), processes outside Pi. Network and all other reads are not restricted: grep/find on a parent directory still search inside the paths above, and secrets already in Pi's environment variables stay visible to bash. Mode is persisted per session and branch; subagents inherit it.",
 				].join("\n"),
 				"info",
 			);
@@ -178,8 +202,14 @@ export default function (pi: ExtensionAPI) {
 		} else if (isToolCallEventType("edit", event) || isToolCallEventType("write", event)) {
 			subject = targetPath(event.input.path, ctx.cwd);
 			const rules = [...PATH_RULES, chezmoiTarget(chezmoiManaged())];
+			// edit は書く前に読み、結果の diff で周りの行を返す。
+			if (mode !== "full" && event.toolName === "edit") rules.push(readDeniedPath(readDenied()));
 			if (mode === "normal" || mode === "ask") rules.push(outsideRoots(roots()));
 			rule = evaluate(rules, subject);
+		} else if (mode !== "full" && ["read", "grep", "find", "ls"].includes(event.toolName)) {
+			// read 以外は path を省け、そのとき cwd を見る。
+			subject = targetPath((event.input as { path?: string }).path || ".", ctx.cwd);
+			rule = evaluate([readDeniedPath(readDenied())], subject);
 		}
 		// 固定の forbid はモードやメタデータ、確認ダイアログより先に適用する。
 		if (rule?.decision === "forbid") {
@@ -217,6 +247,7 @@ export default function (pi: ExtensionAPI) {
 			return { block: true, reason: `guard[${rule.id}]: denied by the user. ${rule.reason}` };
 		}
 		if (ctx.hasUI) ctx.ui.notify(`guard[${rule.id}] blocked: ${head(subject)}`, "warning");
-		return { block: true, reason: `guard[${rule.id}]: ${rule.reason}` };
+		// forbid は上で返したので、ここに来るのは訊けなかった confirm。誰にも訊いていないことを理由に書く。
+		return { block: true, reason: `guard[${rule.id}]: ${rule.reason} No user can be asked in this session.` };
 	});
 }
