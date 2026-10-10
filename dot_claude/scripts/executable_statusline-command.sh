@@ -73,6 +73,31 @@ eval "$(echo "$input" | jq -r '
   "SEVEN_DAY_RESET=" + (.rate_limits.seven_day.resets_at        | if type=="number" then tostring else "" end)
 ' 2>/dev/null)"
 
+# ---------- RunCat Neo JSON export (~/.claude/runcat-usage.json) ----------
+# RunCat Neo は macOS にしかないので、Linux ホストでは読まれない JSON を毎回書かない
+if [ "$(uname -s)" = "Darwin" ]; then
+  runcat_out="${RUNCAT_OUT_FILE:-$HOME/.claude/runcat-usage.json}"
+  runcat_now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  runcat_tmp=$(mktemp "${runcat_out}.XXXXXX" 2>/dev/null)
+  if [ -n "$runcat_tmp" ]; then
+    jq -nc \
+      --arg model "$model_name" \
+      --argjson ctx "${used_pct:-null}" \
+      --argjson five "${FIVE_HOUR_PCT:-null}" \
+      --argjson seven "${SEVEN_DAY_PCT:-null}" \
+      --arg now "$runcat_now" '
+      def fmt: (. * 100 | round / 100 | tostring) + "%";
+      def norm: (. / 100 * 10000 | round) / 10000;
+      def metric($t; $v): if $v == null then empty else {title: $t, formattedValue: ($v|fmt), normalizedValue: ($v|norm)} end;
+      {
+        title: "Claude Code",
+        symbol: "staroflife",
+        metrics: ([{title: "Model", formattedValue: $model}, metric("Context"; $ctx), metric("5h"; $five), metric("7d"; $seven)]),
+        lastUpdatedDate: $now
+      } + (if $ctx == null then {} else {metricsBarValue: ($ctx|fmt)} end)
+    ' > "$runcat_tmp" 2>/dev/null && mv -f "$runcat_tmp" "$runcat_out"
+  fi
+fi
 
 # ---------- Rate limit (Claude Code 2.1.80+ rate_limits field) ----------
 # FIVE_HOUR_PCT / FIVE_HOUR_RESET / SEVEN_DAY_PCT / SEVEN_DAY_RESET は上の jq で設定済み

@@ -120,7 +120,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "$HOME/.claude/statusline-command.sh"
+    "command": "$HOME/.claude/scripts/statusline-command.sh"
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
