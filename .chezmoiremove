@@ -1,2 +1,4 @@
 # compactjev/index.ts に移した。残すと Pi が両方を読み、ハンドラが二重に登録される。
 .pi/agent/extensions/compactjev.ts
+# scripts/statusline-command.sh に移した。残すと settings.json から参照されない古い版が居座る。
+.claude/statusline-command.sh
