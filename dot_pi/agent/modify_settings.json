@@ -7,7 +7,7 @@
    並べ替えるので、通すと pi が書くたびに chezmoi diff に順序だけの差分が出る。
    $cur は現在の実ファイル。fresh host (stdin 空) では既定値を出す。
 */ -}}
-{{- $defaults := dict "theme" "dark" "defaultProvider" "openrouter" "defaultModel" "deepseek/deepseek-v4-flash-0731" -}}
+{{- $defaults := dict "theme" "dark" "defaultProvider" "openrouter" "defaultModel" "deepseek/deepseek-v4.1-flash" -}}
 {{- $cur := dict -}}
 {{- if .chezmoi.stdin }}{{ $cur = fromJson .chezmoi.stdin }}{{ end -}}
 {{- $missing := false -}}
