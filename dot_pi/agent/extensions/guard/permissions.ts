@@ -35,7 +35,9 @@ export function inheritedState(value: string | undefined, pid: number): { mode: 
 
 /**
  * 組み込み reader は出自で識別する。ヒントは自己申告で、既知のシェルと writer は常に除外する。
- * readonly の bash だけは通す。書けないことは sandbox が保証し、sandbox が無ければ index.ts が先に止める。
+ * readonly の bash と monitor だけは通す。書けないことは sandbox が保証し、sandbox が無ければ index.ts が先に止める。
+ * jobs は止める道具なので読み取り専用とは名乗らせず、名前で通す。届くのはこのセッションが起こした job だけで、
+ * ask で確認を挟むと、暴走した job を止める操作のほうが起動より重くなる。
  */
 export function judgePermission(
 	mode: PermissionMode,
@@ -46,12 +48,13 @@ export function judgePermission(
 	},
 ): "allow" | "confirm" | "forbid" {
 	if (mode === "full" || mode === "normal") return "allow";
-	if (mode === "readonly" && toolName === "bash") return "allow";
+	if (toolName === "jobs") return "allow";
+	if (mode === "readonly" && (toolName === "bash" || toolName === "monitor")) return "allow";
 	const builtinReader =
 		["read", "grep", "find", "ls"].includes(toolName) &&
 		tool?.sourceInfo?.source === "builtin" && tool.sourceInfo.path === `builtin:${toolName}`;
 	const readOnly =
-		!["bash", "edit", "write", "powershell"].includes(toolName) &&
+		!["bash", "monitor", "edit", "write", "powershell"].includes(toolName) &&
 		(builtinReader || tool?.annotations?.readOnlyHint === true);
 	if (readOnly) return "allow";
 	return mode === "readonly" ? "forbid" : "confirm";
