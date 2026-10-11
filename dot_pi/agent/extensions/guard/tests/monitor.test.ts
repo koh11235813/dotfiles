@@ -172,7 +172,14 @@ test("1回きりのprint/jsonモードではmonitorを起動しない", async ()
 test("jobsツールと/jobsは、このセッションのjobの一覧・ログ・停止だけを扱う", async () => {
 	const { app, start, jobs } = await session();
 	assert.match(await jobs("list"), /No background jobs/);
+	await app.command("monitor");
+	assert.match(app.notices.at(-1)!, /No background jobs/);
 	const { job, pid } = await sleeper(start, app.ctx.cwd);
+	await app.command("monitor");
+	assert.equal(
+		app.notices.at(-1)!.replace(/Running for: \d+s/, "Running for: <n>s"),
+		["Background jobs: 1 running, 0 ended", "", `Job ${job.id}`, "State: running", "Running for: <n>s", "Command: echo $$ > pid; echo started; sleep 30", `Log: ${job.logPath}`].join("\n"),
+	);
 	assert.match(await jobs("list"), new RegExp(`${job.id}  running  echo \\$\\$ > pid`));
 	const log = await jobs("log", job.id);
 	assert.ok(log.includes(job.logPath));
@@ -192,6 +199,8 @@ test("jobsツールと/jobsは、このセッションのjobの一覧・ログ�
 	assert.match(app.notices.at(-1)!, /stopped/);
 	assert.equal(alive(pid), false);
 	assert.match(await jobs("list"), /stopped/);
+	await app.command("monitor");
+	assert.match(app.notices.at(-1)!, /^Background jobs: 0 running, 1 ended\n\nJob \S+\nState: stopped \(SIGTERM\)\nRan for: \d+s\n/);
 	// 止めた結果は次のターンに添えるだけで、頼まれていないターンは起こさない。
 	await until(() => app.messages.length === 1, "the stop notification");
 	assert.deepEqual(app.messages[0].options, { deliverAs: "nextTurn" });

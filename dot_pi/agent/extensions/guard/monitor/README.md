@@ -10,6 +10,7 @@ guard の一部で、`guard/index.ts` が読み込む。Pi が自動検出する
 | `monitor({ command, timeout? })` | モデル | job を起動し、id とログのパスをすぐ返す。`timeout` は秒で、既定は無し |
 | `jobs({ action, id? })` | モデル | `list` / `log` / `stop`。`log` と `stop` は id が要る |
 | `/jobs`、`/jobs log <id>`、`/jobs stop <id>` | 人 | 同じ操作 |
+| `/monitor` | 人 | 実行状態の表示。走っている数と終わった数、job ごとに状態・経過時間・コマンドの全文・ログのパス |
 
 job が終わると、`monitor-job` という custom message を 1 度だけ送る。
 中身は終わり方、ログのパス、出力の末尾 (80 行・8 KiB まで)。

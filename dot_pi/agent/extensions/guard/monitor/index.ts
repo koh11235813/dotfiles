@@ -40,10 +40,39 @@ function shellEnv(ctx: ExtensionContext): NodeJS.ProcessEnv {
 	return env;
 }
 
-function describe(job: JobSummary): string {
+function outcome(job: JobSummary): string {
 	const end = job.exitCode !== undefined ? ` (exit ${job.exitCode})` : job.signal ? ` (${job.signal})` : "";
+	return `${job.state}${end}${job.reason ? ` [${job.reason}]` : ""}`;
+}
+
+function describe(job: JobSummary): string {
 	const command = job.command.split("\n")[0];
-	return `${job.id}  ${job.state}${end}${job.reason ? ` [${job.reason}]` : ""}  ${command.length > 80 ? `${command.slice(0, 79)}…` : command}`;
+	return `${job.id}  ${outcome(job)}  ${command.length > 80 ? `${command.slice(0, 79)}…` : command}`;
+}
+
+function duration(ms: number): string {
+	const seconds = Math.max(0, Math.round(ms / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+	return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+/** /monitor の表示。一覧 (1 job 1 行) と違い、job ごとに経過時間・コマンドの全文・ログの場所まで出す。 */
+function status(all: JobSummary[]): string {
+	if (all.length === 0) return "No background jobs in this session.";
+	const running = all.filter((job) => job.state === "running").length;
+	return [
+		`Background jobs: ${running} running, ${all.length - running} ended`,
+		...all.map((job) =>
+			[
+				`Job ${job.id}`,
+				`State: ${outcome(job)}`,
+				job.endedAt === undefined ? `Running for: ${duration(Date.now() - job.startedAt)}` : `Ran for: ${duration(job.endedAt - job.startedAt)}`,
+				`Command: ${job.command}`,
+				`Log: ${job.logPath}`,
+			].join("\n"),
+		),
+	].join("\n\n");
 }
 
 export function registerMonitor(pi: ExtensionAPI, prepare: BashSpawnHook) {
@@ -176,6 +205,13 @@ export function registerMonitor(pi: ExtensionAPI, prepare: BashSpawnHook) {
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
 			}
+		},
+	});
+
+	pi.registerCommand("monitor", {
+		description: "Show the state of this session's background jobs",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(status(jobs().list()), "info");
 		},
 	});
 
