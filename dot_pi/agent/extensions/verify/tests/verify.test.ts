@@ -639,3 +639,30 @@ test("submodule の中身もファイル状態に入り、初期化していな�
 	writeFileSync(join(dir, "a.txt"), "two\n");
 	assert.notEqual(fingerprint(dir), empty, "外側の変更は外側の一覧で拾う");
 });
+
+test("guard が居れば、検証コマンドは guard が準備した形で走らせる。断られたら走らせずに未実行にする", async () => {
+	const dir = repo();
+	const mark = join(base, "mark-guard");
+	const app = await session(dir);
+	await app.command("verify", `add echo ran >> ${mark}`);
+	const asked: Array<{ command: string; cwd: string }> = [];
+	let refuse = false;
+	// guard の代わり。guard の wrap と同じく、元のコマンドは環境変数で運び、command は差し替える。
+	app.pi.events.on("guard:bash", (data) => {
+		const request = data as { command: string; cwd: string; env: NodeJS.ProcessEnv; reply: (answer: unknown) => void };
+		asked.push({ command: request.command, cwd: request.cwd });
+		if (refuse) return request.reply({ error: "guard[sandbox]: The OS sandbox is unavailable." });
+		request.reply({ command: `echo wrapped >> ${mark}; eval "$CARRIED"`, cwd: request.cwd, env: { ...request.env, CARRIED: request.command } });
+	});
+
+	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
+	assert.deepEqual(asked, [{ command: `echo ran >> ${mark}`, cwd: dir }]);
+	assert.deepEqual(lines(mark), ["wrapped", "ran"], "guard が返した command と env で起こす");
+	assert.equal(app.statuses.get("verify"), "検証: 成功");
+
+	refuse = true;
+	const boundaries = await task(app, () => writeFileSync(join(dir, "a.txt"), "three\n"));
+	assert.deepEqual(lines(mark), ["wrapped", "ran"], "断られたコマンドを sandbox なしで走らせない");
+	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(.*OS sandbox is unavailable/);
+	assert.deepEqual(boundaries, [undefined], "コードの失敗ではないので、モデルへは戻さない");
+});

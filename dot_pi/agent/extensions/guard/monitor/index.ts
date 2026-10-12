@@ -18,6 +18,8 @@ import { createJobManager, type JobManager, type JobSummary, renderTail } from "
 export const EVENT_MESSAGE = "monitor-event";
 /** ほかの拡張が知らせを入れる口 (`pi.events`)。中身は MonitorEvent。 */
 export const EVENT_CHANNEL = "monitor:event";
+/** ほかの拡張が job の一覧を訊く口 (`pi.events`)。中身は `{ reply }` で、reply に JobSummary の配列を渡す。 */
+export const JOBS_CHANNEL = "monitor:jobs";
 
 /**
  * 知らせの種類ごとに、それが何を意味しないかをモデルに言う文。種類を 1 つにまとめると、終了コード 0 が検証の合格に、
@@ -242,6 +244,13 @@ export function registerMonitor(pi: ExtensionAPI, prepare: BashSpawnHook) {
 		try {
 			live?.ui.notify(`monitor: ignored a malformed event on ${EVENT_CHANNEL}.`, "warning");
 		} catch {}
+	});
+
+	// ほかの拡張 (checkpoint) が、このセッションの job の一覧を訊く口。返すのは一覧の写しだけで、止める口は渡さない。
+	// 止めるかどうかを決めるのは人で、その入口は /jobs stop に既にある。
+	pi.events.on(JOBS_CHANNEL, (data) => {
+		const reply = (data as { reply?: unknown } | null)?.reply;
+		if (typeof reply === "function") reply(manager?.list() ?? []);
 	});
 
 	// 拡張が入れた入力 (source: "extension") は人ではないので数え直さない。

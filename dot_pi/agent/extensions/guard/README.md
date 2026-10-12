@@ -64,6 +64,9 @@ Go は issue が挙げた `~/go/pkg/mod` だけを開けた。checksum の置き
 hook や config (`core.hooksPath`、`core.fsmonitor`、alias) を仕込まれると、次にホスト側で git を打ったとき sandbox の外で実行されるため。submodule の分は、ホスト側の `git status` が submodule の中でも git を起こすため。
 `.git` ごと rename して作り直す道も塞いでいる (Linux は mount point にする、macOS は unlink を拒否する)。書ける場所から書かせない場所までの間のディレクトリ (`.git/modules`、`.git/modules/<名前>`) も同じ扱いで、動かせない。
 root の下で見つけたリポジトリも同じで、sandbox の中からは `app/.git` も、それを収めたディレクトリ `app` も動かせない (`mv app app2` は失敗する)。
+**消すこともできない。モデルが自分で作ったリポジトリも、次の呼び出しからは同じ扱いになる。** `git clone` や `git init` で作ったディレクトリを後の呼び出しで `rm -rf` すると、終了コード 1 で `cannot remove '.../.git/config': Device or resource busy` と出て、`.git/config` と `.git/hooks` だけの殻が残る。同じ名前への clone し直しも `already exists and is not an empty directory` で失敗する (Arch で確かめた)。中に `.git` を持つディレクトリの `rm -rf` (CMake の FetchContent が置く `build/_deps/<名前>-src`、vendor の checkout) と `git clean -ffdx` も同じ。作った呼び出しの中でなら消せる。残った殻は `!` か full で消す。
+bubblewrap は mount point にしたものを消せなくするので、「塞ぐ」と「消せる」は両立しない。root の下を探して塞ぐのは issue #40 の項目 (`.git/hooks`・`.git/config`) に足した分で、やめれば BASE と同じく root の中は自由に消せるが、リポジトリをいくつか収めた親ディレクトリで Pi を起動したときに、その中の hooks と config を守るものが無くなる。どちらを取るかは未決。
+`hooks` や `config` が symlink のとき (共有の hooks ディレクトリへ向けている) は、リンク先も書かせない場所に数える。sandbox はリンク先を読み取り専用に重ね、edit / write はリンク越しでもリンク先を直に指しても確認になる。
 `modules` ごとは塞いでいない。submodule の中の commit・fetch・checkout が index と objects を書くため。submodule の git dir は呼び出しのたびに探し直し、一度見つけたものは Pi のプロセスが生きている間ずっと塞ぐ (目印の `HEAD` を消して外す道を塞ぐ)。
 
 この代わりに、sandbox の中では config を書く git の操作が通らない。通らなさ方が 2 通りあり、後のほうはモデルが成功と読み違える。
@@ -137,11 +140,12 @@ subagent ツールに `worktree: true` を付けると、タスクごとに git 
 - **子が終わったら、worktree ごとの要約を結果の末尾に足す。** 未 commit の変更 (`git status --porcelain`)、元からの commit (`git log --oneline`)、元との差分の統計 (`git diff --stat`) を、それぞれ 40 行まで。差分の全文は流さない (worktree に残っていて、親が bash で読める)。公式 sample の `details.results` には触らない。
 - **統合も削除もしない。** 結果の末尾に「何も merge していない。統合は人が承認してから。削除は人が頼んだときだけ」と書く。merge・cherry-pick・`git worktree remove` を guard が代わりに打つことは無い。worktree と枝は残り続けるので、要らなくなったら人が `git worktree remove` と `git branch -D` で消す。
 - **git は sandbox の中で打つ** (full では sandbox が無いのでそのまま)。`git worktree add` は checkout で、`git status` / `git diff` は子が書いた後の作業ツリーの上で、リポジトリの config・hooks・filter を読む。Pi のプロセスでそれを打つと、モデルの頼んだ git がホストで走ることになる。sandbox の中なので、hooks と config を書けない制限 (上の「書かせない git の場所」) もそのまま掛かる。
-- **worktree の中で起こされた子は、書ける場所を自分の worktree に絞る。** 子の guard は、起こされた cwd が継いだ root の `.pi-worktrees/<名前>` の中なら、親の root ではなくその worktree を root にする (`/permissions` の `Write root` に出る)。子は親の作業ツリーにも、隣の worktree にも書けない。git の common dir は親から継いだものをそのまま使うので commit はできる。worktree の `.git` ファイル (git dir の向き先) は、root の `.git` がファイルのときの決まりで書けなくなる。
+  - **worktree を作る git は bash と同じ sandbox (書ける場所つき)、子が終わった後の要約を取る git はどこにも書けない sandbox で打つ。** 子は自分の worktree の中に、その上で走る git が実行する設定を用意できる (worktree の `commondir` を向け直した先の config、index に載せた入れ子のリポジトリの config。どちらも `core.fsmonitor` で実測)。書ける場所つきで要約を取ると、子の用意したスクリプトが親の root と隣の worktree に書く。どこにも書けない sandbox なら、走っても書けない (読むことと通信はできる。子が自分の sandbox の中でできることと同じ)。設定を 1 つずつ無効にする案は捨てた (git がコマンドを起こす設定は数え切れない)。
+- **worktree の中で起こされた子は、書ける場所を自分の worktree に絞る。** 子の guard は、起こされた cwd が継いだ root の `.pi-worktrees/<名前>` の中なら、親の root ではなくその worktree を root にする (`/permissions` の `Write root` に出る)。worktree の中の置き場にさらに worktree があれば (worktree に絞られた子が `worktree: true` で起こした孫)、いちばん内側のものに絞るので、孫どうしも分かれる。子の bash・edit・write は、親の作業ツリーにも、隣の worktree にも書けない (親や人が後でその worktree の上で git を打ったときのことは、下の「できないこと」)。git の common dir は親から継いだものをそのまま使うので commit はできる。worktree の `.git` ファイル (git dir の向き先) は、root の `.git` がファイルのときの決まりで書けなくなる。
   - 親の sandbox からも、置き場の下の worktree の `.git` ファイルは書けない (`sandbox.ts` の `gitLocks`)。そのため sandbox の中からは worktree を消すことも動かすこともできない (`rm -rf .pi-worktrees/<id>` は失敗する)。`.git` がファイルのものを root の下から全部探して塞ぐ案は捨てた (submodule の作業ツリーまで動かせなくなる)。
   - 絞る判定は場所だけで、本当に worktree かは確かめない。絞る向きにしか働かないので、誰が作ったディレクトリでも書ける場所は広がらない。
   - 環境変数 `PI_GUARD` は並んで起こされる子に共通なので、子ごとの root をそこには載せられない。だから子が自分の cwd から決める。
-  - 絞られた子は、自分の worktree の外を `cwd` にした subagent を起こせない (`guard[worktree]: cwd ... is outside this session's worktree` で遮断)。孫も `PI_GUARD` の root (親の root) を継いで自分の cwd から絞り直すので、外で起こされると親の作業ツリーや隣の worktree に書ける。`cwd` を省いた孫は子の cwd で起き、同じ worktree に絞られる。見るのは subagent ツールの引数だけで、公式 sample が `cwd` をそのまま spawn に渡すことに頼っている。子が `PI_GUARD` を絞った root に書き直す案は捨てた (子孫は `PI_GUARD` を書かない、という `/reload` のための決まりを崩す)。
+  - 絞られた子は、自分の worktree の外を `cwd` にした subagent を起こせない (`guard[worktree]: cwd ... is outside this session's worktree` で遮断)。孫も `PI_GUARD` の root (親の root) を継いで自分の cwd から絞り直すので、外で起こされると親の作業ツリーや隣の worktree に書ける。`cwd` を省いた孫は子の cwd で起き、同じ worktree に絞られる。自分の worktree の中にある worktree を `cwd` にした孫は起こせる (孫はそこに絞られる)。見るのは subagent ツールの引数だけで、公式 sample が `cwd` をそのまま spawn に渡すことに頼っている。子が `PI_GUARD` を絞った root に書き直す案は捨てた (子孫は `PI_GUARD` を書かない、という `/reload` のための決まりを崩す)。
 - 捨てた案:
   - root の外 (`~/.local/state` や一時ディレクトリ) に作って、子の書ける場所に足す。書ける場所を広げる向きで、どこまで広げてよいかを決める材料が無い。一時ディレクトリは、sandbox の中のどのコマンドからも書けるので分離にならない。
   - subagent の拡張が Pi のプロセスで git を打つ。上の理由 (ホストで git が走る) で捨てた。
@@ -156,6 +160,28 @@ bash を同名で差し替えているので、Pi が組み込みの bash に渡
 - `shellPath` は sandbox の中でコマンドを実行するシェルになる。sandbox の外で launcher を起こすシェルは `/bin/bash` のまま変えない。`shellPath` は project の settings.json にも書けるので、外側に使うと sandbox の外で任意のものを実行できてしまう。full では `shellPath` がそのまま実行する。
 - どのホストでも未設定なので、実際の設定で動かしたことは無い。Windows (WSL の bash を stdin で起こす経路) は扱っていない。
 
+### ほかの拡張が自分で起こすコマンド
+
+ほかの拡張は、自分で起こすコマンドの準備を guard に頼める。いま頼んでいるのは verify 拡張 (`extensions/verify/`) の検証コマンドだけ。
+
+- 口は Pi のイベントバス。`pi.events.emit("guard:bash", { command, cwd, env, reply })` で頼むと、`reply` に準備済みの `{ command, cwd, env, readonly }` か、断る理由 `{ error }` が渡る。返事は `emit` から戻る前に来る。頼んだ側は、返ってきた `command` を `/bin/bash -c` に、`cwd` と `env` をそのまま渡して起こす。
+- `readonly` は、readonly の sandbox で準備したかどうか。そこで落ちたコマンドは、書けずに落ちたのか、コードのせいで落ちたのかを見分けられない。頼んだ側がそれをコードの失敗として扱わないための印で、verify は readonly での失敗をモデルへ差し戻さない。sandbox の部品ではない。
+- 準備は bash ツールと同じもの (設定の `shellPath` / `shellCommandPrefix`、モードごとの sandbox、readonly の `TMPDIR`)。full では何も包まずに返す。
+- 規則表のうち固定の禁止 (force push) は効き、理由を返す。確認つきの規則と ask の確認は掛けない。何を走らせるかを承認するのは頼んだ拡張の仕事で (verify なら `/verify add` を打った人)、ここで訊くと、人が登録したコマンドを走らせるたびに訊き直すことになる。
+- full 以外で sandbox が使えなければ断る。sandbox なしの形は返さない。
+- sandbox の部品 (書ける場所、launcher の引数) は渡さない。渡すと、境界を決める場所が guard と頼む側の 2 つになる。monitor を guard の中に置いたのと同じ理由。
+- 頼めるのは Pi のプロセスの中の拡張だけで、sandbox の中のコマンドからは届かない。頼まずに起こす拡張は包めない (下の「できないこと」の「MCP と他の拡張のツールは sandbox の外」)。
+
+### ほかの拡張が sandbox の外で起こす道具
+
+sandbox の外で道具を起こす拡張は、その実体を guard に訊ける。いま訊いているのは checkpoint と verify の `git`。
+
+- 口は `pi.events.emit("guard:binary", { name, reply })`。`reply` に絶対パスか、見つからなければ `undefined` が渡る。返事は `emit` から戻る前に来る。
+- 探し方は guard 自身の chezmoi と同じ (下の「そのほかの決めごと」)。PATH の相対の要素と、書ける場所の中にあるものを飛ばし、symlink を解いた先を返す。
+- 訊かずに名前だけで起こすと PATH を探す。PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin` を有効にしたシェルから Pi を起動した、mise の shims)、モデルが bash でそこに置いた同じ名前のものが、sandbox の外で走る。checkpoint と verify の `git` がこの形で、次の write / edit か次のターンの始めに、人の操作なしに外で走った (レビューでの実測)。
+- 「見つからない」という返事と、返事が無い (guard が居ない) のは別。前者のとき、頼んだ側は名前で起こし直さない (guard が飛ばした候補を拾う)。後者なら sandbox も無いので、名前のまま起こしてよい。
+- 訊くことは強制できない。訊かずに名前で起こす拡張と Pi 本体は、下の「できないこと」の「PATH 経由で sandbox の外に出る道」。
+
 ### sandbox が起動しなかったとき
 
 probe が通った後でも起動は失敗しうる (user namespace を後から止められた、bind する先が消えた)。
@@ -168,19 +194,29 @@ write は sandbox を 2 回起こすので、`mkdir -p` が済んだ後で書き
 ### そのほかの決めごと
 
 - **git の common dir は、root ごとに Pi のプロセスが生きている間 1 度しか訊かない。** `/reload` をまたいでも最初の答えを使う (答えを `globalThis` に置いている)。訊き直すと、モデルが `.git` を書き換えた後の答えで書ける場所が広がる。固定するのは書ける場所を決める側だけで、書かせない場所は呼ぶたびに探し直す (上の「書かせない git の場所」)。だから、リポジトリでない root で Pi を起動した後に `git init` しても common dir は付かないままだが、その `.git` は root の中なので書け、`hooks` と `config` は次の呼び出しから塞がれる。
-- **chezmoi は PATH から探すが、相対の要素と、書ける場所の中にある候補は飛ばす。** 決まった絶対パスだけを見る案は捨てた (置き場がホストごとに違い、見つからないと `chezmoi-target` の規則が黙って効かなくなる)。それでも、chezmoi を mise で入れているホストでは置き場 (`~/.local/share/mise`) が書ける場所なので拾われず、規則は効かない。
+- **sandbox の外で起こす道具 (guard の chezmoi と、checkpoint・verify の git) は PATH から探すが、相対の要素と、書ける場所の中にあるものは飛ばし、symlink を解いた先を起こす。** 書ける場所は、full でも normal のもので見る (full に切り替える前に sandbox の中から置かれたものかもしれない)。worktree に絞られた子の Pi でも、自分の worktree ではなく親の root で見る (親のモデルが親の root に置いたものかもしれない)。
+  - PATH にあった候補のまま起こす案は捨てた。書ける場所に置いた symlink が書ける場所の外を指していると通り、確かめた後で掛け替えられる。
+  - symlink の先の名前が違うもの (mise の shim のように、呼ばれた名前で振る舞いを変えるもの) は飛ばす。先を直に起こすと別のコマンドになる。
+  - 決まった絶対パスだけを見る案は捨てた (置き場がホストごとに違い、見つからないと `chezmoi-target` の規則が黙って効かなくなる)。
+  - それでも、chezmoi や git を mise で入れているホストでは、置き場 (`~/.local/share/mise`) が書ける場所なので拾われない。chezmoi なら `chezmoi-target` の規則が効かず、git なら checkpoint は基準を取れず、verify はリポジトリの外と同じ扱いになる (書ける場所の外にもう 1 つあれば、そちらを使う)。
 - **readonly の一時ディレクトリは `pi-guard-<pid>-XXXXXX`。** Pi の起動時 (`session_start` の `startup`) に、持ち主の pid がもう居ないものを消す。古さで選ぶ案は捨てた (開いたままのセッションのものを消してしまう)。pid の無い古い名前 (`pi-guard-XXXXXX`) には触らないので、この版より前に残ったものは手で消す。親から継いだ Pi は掃除しない。持ち主が居るかどうかは自分の pid namespace で見るので、同じ `/tmp` を共有する別の pid namespace (コンテナなど、`PI_GUARD` を継がない経路) で Pi を起動すると、ホスト側で生きている Pi の一時ディレクトリを消しうる (uid が同じ場合。動かして確かめてはいない)。
 
 ## できないこと
 
 - **git 経由で sandbox の外に出る道を全部は塞げない。** 塞いだのは hooks・config・向き先という直接の道だけ。git は、書き換えられる作業ツリーの上で安全に動くようには作られていない。Arch で確かめた抜け道が 3 つ残っている。
   - 作業ツリーの中に入れ子のリポジトリを作り、その config に `core.fsmonitor` を書いて `git add` する (gitlink)。ホスト側の `git status` がその config を読んで実行する。書くのは作業ツリーと index だけなので、sandbox では止められない。
-  - Linux で、`.git/commondir` というファイルを新しく作って common dir をよそへ向ける。bubblewrap は無いファイルを「作らせない」ことができない (重ねるには実物の空ファイルが要り、空の `commondir` はホスト側の git を止める)。macOS はパスで拒否している。
+  - Linux で、`.git/commondir` というファイルを新しく作って common dir をよそへ向ける。bubblewrap は無いファイルを「作らせない」ことができない (重ねるには実物の空ファイルが要り、空の `commondir` はホスト側の git を止める)。macOS はパスで拒否している。この道は、人が git を打つのを待たなくても踏める。Pi の中に、人の操作なしに sandbox の外で git を打つ拡張があるため (checkpoint が最初の依頼のたびに基準を取る `git add`。subagent の子の Pi でも走る)。向け直した先の config に書いた hook (`hook.<名前>.event` / `command`) がその `git add` で走り、モデルが bash で仕込んで subagent を呼ぶだけで外に出られた (レビューでの実測)。checkpoint の側で、その git が出す event の hook を止めた (checkpoint の README の「できないこと」)。sandbox の外で git を打つ拡張を足すときは、同じことが要る。
   - submodule のあるリポジトリで、submodule の作業ツリーにある `.git` ファイル (git dir の向き先) を書き換える。塞いだのは既にある git dir の hooks と config だけで、このファイルは書ける。git dir を書ける場所へ写して config に `core.fsmonitor` を足し、`.git` ファイルをそこへ向け直すと、ホスト側の `git status` がその config を読んで実行する。sandbox の中から新しく作った `modules/<名前>` も、作った呼び出しの間は塞がれていない (次の呼び出しから塞ぐ)。
   - リポジトリでない root で起動して `git init` した、または root の下に新しくリポジトリを作った、その同じ呼び出しの中では `hooks` も `config` も書ける (`git init && echo ... > .git/hooks/pre-commit`)。起動した時点で無い `.git` には何も重ねられない。次の呼び出しからは塞ぐ。
   - root から 4 段以上深いところにあるリポジトリと、root の下で見つけたリポジトリの submodule (`app/.git/modules/<名前>`) は塞いでいない。
   - ほかに、`core.hooksPath` が元から作業ツリーの中を指している、husky のように hook が追跡ファイルにある、linked worktree の `<common>/worktrees/<name>/commondir` の書き換え、hooks が symlink のときのリンクの掛け替え、も塞いでいない。
   - sandbox の中で作業させたリポジトリで git を打つ前に、`git status` ではなく差分を読んで確かめる以外の対策は guard には無い。
+- **PATH 経由で sandbox の外に出る道を全部は塞げない。** PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin` や `node_modules/.bin` を PATH に入れたシェルから Pi を起動した、mise の shims)、sandbox の外で道具を名前だけで起こすものが、そこに置かれた同じ名前のものを拾う。塞いだのは guard の chezmoi と、checkpoint・verify の git だけ (上の「そのほかの決めごと」)。残っているもの:
+  - Pi 本体の footer (TUI だけ)。HEAD が `ref: refs/heads/.invalid` のとき、枝の名前を PATH の `git` に訊く (`dist/core/footer-data-provider.js` の `resolveBranchWithGitSync` / `resolveBranchWithGitAsync`)。`.git/HEAD` は sandbox の中から書ける。Pi 本体なので拡張からは直せない。コードを読んだだけで、動かして確かめてはいない。
+  - guard が git の common dir を訊く `git` (`sandbox.ts` の `gitCommonDir`)。名前で起こすが、root ごとに Pi のプロセスで 1 度、セッションの始めだけ。そのセッションのモデルが置いたものは拾わないが、前のセッションで置かれて残っているものは拾う。sandbox 導入時からの挙動で、変えていない。
+  - git が自分で起こすコマンド。checkpoint の git が、利用者の `~/.gitconfig` にある filter (`git-lfs` など) を起こすとき、その名前は git が PATH から探す (実測。checkpoint の README の「できないこと」)。
+  - 訊かずに名前で起こす、ほかの拡張と MCP サーバー。
+  - 確実なのは、sandbox の中から書ける場所を PATH に入れずに Pi を起動すること。
 - **root が chezmoi の source ディレクトリのとき、`chezmoi managed` 経由で sandbox の外に出られる。** guard は edit / write のたびに sandbox の外で `chezmoi managed` を呼び、chezmoi はそのとき source の template を実行する。source に `.chezmoiignore` を `{{ output "touch" "..." }}` の中身で置くと、`chezmoi managed` がそれを実行することをレビューで実測している。この dotfiles リポジトリ (`~/.local/share/chezmoi`) を root にして Pi を使うと、normal の bash が `.chezmoiignore` を書き換えられ、次の edit / write で外で実行される。`chezmoi.toml` を開けなかったのと同じ出口が source 側に残っている。sandbox 導入前からの挙動で、塞ぐには「source が書ける場所の中にあるときは `chezmoi managed` を呼ばない」などの形になるが、そうすると `chezmoi-target` の規則がこのリポジトリで効かなくなる。どちらを取るかは未決。
 - **uv / pipx / mise の置き場は、中に実行ファイルが入る。** ここに書けるものは、sandbox の外で次に動く道具を差し替えられる。入れる作業を通すことと両立しないので開けている。`~/.config/gh` も同じで、gh の alias を書ける。
 - **`~/.ssh` は丸ごと読めない。** sandbox の中から ssh 経由の git は使えない。秘密鍵だけ塞いで `config` と `known_hosts` を読ませる形にはしていない。読める場所を広げる判断で、ssh-agent 越しに鍵を使えるようにするかどうかと合わせて決める必要がある。
@@ -192,9 +228,13 @@ write は sandbox を 2 回起こすので、`mkdir -p` が済んだ後で書き
   - 試さなかった案: Node の `child_process.spawn` を差し替えて、subagent の実行中に起きた spawn を bubblewrap で包む (技術的にはできそうだが、Pi のプロセス全体の組み込み関数を書き換える。公式 sample が起こし方を変えると、包めていないことに誰も気づかない)、`process.execPath` / `process.argv[1]` を一時的に書き換える (並んで動くほかの処理が巻き込まれる)、sample をコピーして直す (Pi の更新を取り込めなくなる)。
   - 包むと決めた場合に要ること (Arch で確かめた事実): bubblewrap の入れ子は動く (子の guard が子の bash をもう一度包める)。子の Pi は agent dir に書けないと `auth.json` の鍵を使えない (`settings.json` と `auth.json` は、読むだけでも隣に lock のディレクトリを作る。読み取り専用だと `Invalid settings file ...: EROFS ... mkdir '.../settings.json.lock'` の警告の後、`No API key found for the selected model.` で終了コード 1)。だから子には `~/.pi/agent` を書かせた上で、`extensions` や `settings.json` を個別に塞ぐ設計になる。macOS の sandbox-exec は入れ子にできないので、子の guard に「もう囲いの中にいる」と信じさせる別の道が要る。
 - **worktree で分かれるのは、追跡ファイルの作業ツリーだけ。** `node_modules`・ビルドの出力・`.env` など追跡していないものは worktree に無い (子が自分で入れ直す)。ポート、環境変数、道具のキャッシュ (`~/.cache` など)、git の common dir (objects・refs・stash・config) は全部の worktree と元の作業ツリーで共有のまま。同じ枝を 2 つの worktree で checkout できない、という git の制限もそのまま。
-- **worktree の検証結果は返さない。** 返すのは差分の要約だけ。検証コマンドを走らせる仕組みは別の拡張で、ここからは呼んでいない。
+- **worktree の検証結果は返さない。** 返すのは差分の要約だけ。検証コマンドを走らせる仕組みは別の拡張 (verify) で、ここからは呼んでいない。子の Pi にも verify は読み込まれるので、登録があれば子の中で検証は走る (verify の README の「print / json モードでも走る」) が、その結果を親に返る結果に載せることはしていない。
 - **「統合は承認後」は文面だけ。** 結果にそう書いてモデルに伝えるが、親のモデルが自分の bash で `git merge pi-subagent/<id>` を打つのは止めていない (root の中の、普通の git の操作)。ask モードなら bash のたびに確認が出る。
-- **worktree の `<common>/worktrees/<id>/commondir` は、子と親の両方から書ける。** 塞いだのは worktree の `.git` ファイルだけ。`commondir` を書き換えた worktree で人が git を打つと、その先の config が読まれる (上の「git 経由で sandbox の外に出る道」の最後の項と同じ)。worktree を作る前から走っている monitor の job は、その `.git` ファイルも書ける (sandbox は起動したときに組まれ、そのとき無かったファイルは塞がれていない)。作った後に起こす bash と job、それに子の側は塞がっている。
+- **子が書いた worktree の上で、親のモデルや人が git を打つと、子の用意した設定が実行されうる。** 子の bash は親の作業ツリーに直接は書けないが、自分の worktree の中に、その上で走る git が実行する設定を用意できる (上の「git は sandbox の中で打つ」の項の 2 つ)。guard 自身が打つ要約の git はどこにも書けない sandbox に入れたが、ほかは入れていない。
+  - 親のモデルが bash で `git -C <worktree> diff <元>` や `git -C <worktree> status` を打つと (結果の末尾の文面がそう勧めている)、子の用意したスクリプトが親の sandbox の中で走り、親の root と隣の worktree に書ける。「子は隣の worktree に書けない」が破れる道がここに残っている。
+  - 人がホスト側で同じ git を打つと、sandbox の外で走る (上の「git 経由で sandbox の外に出る道」と同じ)。
+  - `<common>/worktrees/<id>/commondir` は既にあるファイルなので Linux でも読み取り専用に重ねられ、試すと向け直しは止まった。入れていないのは、止まるのがこの 1 本だけ (入れ子のリポジトリの道は残る) で、代わりに、後の呼び出しでの `git worktree remove` と `git worktree prune` が管理用のディレクトリを消せなくなるため (`error: failed to delete '.git/worktrees/<名前>': Device or resource busy` で、作業ツリーだけ消えて prunable な登録が残る。Arch で実測)。塞ぐなら `sandbox.ts` の `gitLocks` に `<common>/worktrees/*/commondir` を足す。未決。
+  - 結果の末尾の文面 (`git -C <worktree> diff <base>` を勧める) は変えていない。文面を変えても、親のモデルが worktree の上で git を打つことは止められない。信用できない入力を読ませる子に `worktree: true` を付けても、親の作業ツリーが守られるとは考えないこと。worktree を作る前から走っている monitor の job は、その `.git` ファイルも書ける (sandbox は起動したときに組まれ、そのとき無かったファイルは塞がれていない)。作った後に起こす bash と job、それに子の側は塞がっている。
 - **root がリポジトリの中で占める位置に追跡ファイルが無いと、子を起こせない。** 子の cwd は worktree の中の同じ位置で、追跡ファイルの無いディレクトリは worktree に作られない。公式 sample の spawn が失敗し、worktree は残る。
 - **残った worktree は掃除しない。** 後ろの拡張が `tool_call` で遮断した呼び出しや、起動に失敗した子の worktree も残る。並列の途中で `git worktree add` が失敗したときも、先に作った分は残り (sandbox の中からは worktree を消せない)、遮断の理由にその場所を書く。数が増えたら人が消す。
 - **worktree つきの subagent は、実物の Pi では動かしていない。** 引数の書き換えが実行に届くこと (`types.d.ts` の `ToolCallEventResult` の注記) と、公式 sample がタスクごとの `cwd` で子を起こすこと (`runSingleAgent`) はコードを読んで合わせ、テストでは `tool_call` と `tool_result` のイベントを流し、worktree の中身と、絞られた子の bash を実物の sandbox で確かめた。
@@ -207,7 +247,6 @@ write は sandbox を 2 回起こすので、`mkdir -p` が済んだ後で書き
 - **ユーザーが自分で打つ `!` コマンドは sandbox に入れていない。** 意図したもの。
 - **macOS では確かめていない。** この版で足した seatbelt の規則 (git の場所への書き込み拒否と、親の unlink 拒否) は Linux のホストで書いたもので、プロファイルの文面しかテストしていない。起動の印 (fd の受け渡し) も macOS では動かしていない。起動時の probe は書かせない場所の無いプロファイルで試すので、書かせない場所つきのプロファイルだけが `sandbox-exec` に拒否されると、probe は通ったまま git リポジトリでの normal / ask の bash が全部 `guard[sandbox]: The OS sandbox did not start ...` で終わる。macOS のホストに `chezmoi apply` する前に、git リポジトリで 1 度 bash を動かして確かめる必要がある。edit / write の sandbox 越しの読み書きも Linux でしか動かしていない。同じ profile で `/bin/bash`・`/bin/cat`・`/bin/mkdir` を起こすだけだが、macOS で 1 度 write と edit を動かして確かめる必要がある (こちらの起動の印は fd 3 で、`sandbox-exec` が継いだ fd をそのまま渡すことを当てにしている)。
 - **実物の TUI での見え方は確かめていない。** status の表示と確認ダイアログは、テスト用の偽の `ctx.ui` に渡った内容で確かめている。子から回ってきた確認は、subagent ツールが走っている最中に、ツールの外 (タイマー) から `ctx.ui.confirm` を呼ぶ。実物の TUI でそのダイアログが出て答えられるかは、人が 1 度触って確かめる必要がある。出なかった場合、子は親が居る限り待ち続けるので、Esc で subagent を止める。子が居なくなったときに `signal` でダイアログが閉じることも、`modes/interactive/interactive-mode.js` の `showExtensionSelector` が `opts.signal` を見ているのを読んだだけで、実物では触っていない。
-- **テストの時間切れの検証は、同じホストで同じテストが並んで走ると落ちる。** `pgrep` でホスト全体の `sleep 61.5` を数えているため。
 
 ## テスト
 
@@ -216,4 +255,5 @@ node dot_pi/agent/tests/run.mjs
 ```
 
 `guard/tests/` のテストは `os.tmpdir()` の下に `guard-*` を作り、終わったら消す。
+時間切れの検証は `pgrep` でホスト全体から自分の `sleep` を数えるので、秒数に自分の pid を入れて、同じテストを並べて走らせている別のプロセスのものを拾わないようにしている。
 本物の `/tmp` と `/var/tmp` を書ける場所から外すために、`SHARED_TMP_PATHS` を空にしてから始める (`EXTRA_WRITE_PATHS` の並びには依らない)。

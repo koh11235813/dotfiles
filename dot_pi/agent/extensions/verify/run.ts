@@ -39,14 +39,14 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals) {
 	} catch {}
 }
 
-export function run(command: string, cwd: string, options: { timeoutMs: number; signal: AbortSignal }): Promise<RunResult> {
+export function run(command: string, cwd: string, options: { timeoutMs: number; signal: AbortSignal; env?: NodeJS.ProcessEnv }): Promise<RunResult> {
 	return new Promise((resolve) => {
 		if (options.signal.aborted) return resolve({ ended: "cancelled", code: null, tail: "" });
 		let tail: Buffer = Buffer.alloc(0);
 		let ended: RunResult["ended"] = "exited";
 		const timers: NodeJS.Timeout[] = [];
 		// detached にしないと、シェルが起こした子 (テストランナーの worker など) にシグナルが届かない。
-		const child = spawn("/bin/bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn("/bin/bash", ["-c", command], { cwd, env: options.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
 		const stop = (cause: RunResult["ended"]) => {
 			if (ended !== "exited") return;
 			ended = cause;

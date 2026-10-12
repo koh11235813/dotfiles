@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { after, test } from "node:test";
 import guard from "../index.ts";
 import { SHARED_TMP_PATHS, sandbox, sandboxAvailable } from "../sandbox.ts";
@@ -278,6 +278,82 @@ test("worktreeの中で起こされた子は、書ける場所を親のrootで�
 	}
 });
 
+test("worktreeに絞られた子も、親のrootの中に置かれた道具をsandboxの外で起こさない", async () => {
+	const root = repo("planted");
+	const worktree = join(root, ".pi-worktrees", "abcd1234");
+	mkdirSync(join(root, ".pi-worktrees"));
+	git(root, "worktree", "add", "-q", "-b", "pi-subagent/abcd1234", worktree, "HEAD");
+	// 親のモデルは親の root に書ける。子の書ける場所 (自分の worktree) の外でも、sandbox の中から置ける場所。
+	const planted = join(root, ".venv", "bin");
+	const ran = join(base, "planted-ran");
+	mkdirSync(planted, { recursive: true });
+	writeFileSync(join(planted, "chezmoi"), `#!/bin/sh\ntouch ${ran}\n`, { mode: 0o755 });
+	const path = process.env.PATH;
+	process.env.PI_GUARD = JSON.stringify({ mode: "normal", root, git: join(root, ".git"), pid: process.pid + 1 });
+	process.env.PATH = planted;
+	process.chdir(worktree);
+	try {
+		const app = extensionHost();
+		app.ctx.hasUI = false;
+		guard(app.pi);
+		app.ctx.cwd = worktree;
+		await app.emit("session_start");
+		let answer: string | undefined | null = null;
+		app.pi.events.emit("guard:binary", { name: "chezmoi", reply: (given?: string) => (answer = given) });
+		assert.equal(answer, undefined);
+		assert.equal(await app.emit("tool_call", { toolName: "write", toolCallId: "w1", input: { path: join(worktree, "sub", "x.txt"), content: "x" } }), undefined);
+		assert.equal(existsSync(ran), false);
+	} finally {
+		process.env.PATH = path;
+		process.chdir(home);
+		delete process.env.PI_GUARD;
+	}
+});
+
+test("worktreeの中の子がさらにworktreeで起こした孫は、いちばん内側のworktreeに絞られ、孫どうしは分かれる", async () => {
+	const root = repo("grandchildren");
+	const outer = join(root, ".pi-worktrees", "aaaa1111");
+	mkdirSync(join(root, ".pi-worktrees"));
+	git(root, "worktree", "add", "-q", "-b", "pi-subagent/aaaa1111", outer, "HEAD");
+	mkdirSync(join(outer, ".pi-worktrees"));
+	const [inner, sibling] = ["bbbb2222", "cccc3333"].map((id) => {
+		git(outer, "worktree", "add", "-q", "-b", `pi-subagent/${id}`, join(outer, ".pi-worktrees", id), "HEAD");
+		return join(outer, ".pi-worktrees", id);
+	});
+	// 孫も PI_GUARD の root (いちばん上の親の root) を継ぐ。
+	process.env.PI_GUARD = JSON.stringify({ mode: "normal", root, git: join(root, ".git"), pid: process.pid + 1 });
+	try {
+		const child = async (cwd: string) => {
+			process.chdir(cwd);
+			const app = extensionHost();
+			app.ctx.hasUI = false;
+			guard(app.pi);
+			app.ctx.cwd = cwd;
+			await app.emit("session_start");
+			await app.command("permissions");
+			return app;
+		};
+		const write = (app: Awaited<ReturnType<typeof child>>, path: string) => app.emit("tool_call", { toolName: "write", toolCallId: "w", input: { path, content: "x" } });
+		const grandchild = await child(join(inner, "sub"));
+		assert.match(grandchild.notices.at(-1)!, new RegExp(`Write root: ${inner}\\n`));
+		assert.equal(await write(grandchild, join(inner, "sub", "x.txt")), undefined);
+		for (const path of [join(sibling, "x.txt"), join(outer, "sub", "x.txt"), join(root, "sub", "x.txt")]) {
+			assert.match(reason(await write(grandchild, path)), /guard\[outside-write-roots\]/, path);
+		}
+		// 外側の worktree に絞られた子は、自分の中の worktree を cwd にした孫を起こせる (孫はそこに絞られる)。外は今までどおり起こせない。
+		const narrowed = await child(join(outer, "sub"));
+		assert.match(narrowed.notices.at(-1)!, new RegExp(`Write root: ${outer}\\n`));
+		const step = { agent: "worker", task: "a" };
+		assert.equal(await narrowed.emit("tool_call", call({ ...step, cwd: inner })), undefined);
+		assert.match(reason(await narrowed.emit("tool_call", call({ ...step, cwd: root }))), /outside this session's worktree/);
+		// 孫は、隣の孫と外側の worktree を cwd にしたひ孫を起こせない。
+		for (const cwd of [sibling, outer]) assert.match(reason(await grandchild.emit("tool_call", call({ ...step, cwd }))), /outside this session's worktree/, cwd);
+	} finally {
+		process.chdir(home);
+		delete process.env.PI_GUARD;
+	}
+});
+
 test("worktreeに絞られた子のbashは、worktreeの中でcommitでき、親の作業ツリーとworktreeの向き先は書けない", { skip: cannotRun }, async () => {
 	const root = repo("narrowed-bash");
 	const worktree = join(root, ".pi-worktrees", "abcd1234");
@@ -303,3 +379,64 @@ test("worktreeに絞られた子のbashは、worktreeの中でcommitでき、親
 		delete process.env.PI_GUARD;
 	}
 });
+
+// 子は自分の worktree の中に、その上で走る git が実行する設定を用意できる。親が結果に付ける差分のための git が
+// 親の書ける場所つきで走ると、子の用意したスクリプトが親の作業ツリーと隣の worktree に書く。
+for (const [name, plant] of [
+	// common dir の写しに fsmonitor を仕込み、自分の worktree の commondir をそこへ向ける。
+	[
+		"commondirの向け直し",
+		(root: string, worktree: string) => [
+			`cp -r ${root}/.git/. evil/`,
+			`git config -f evil/config core.fsmonitor ${worktree}/fsm.sh`,
+			`echo ${worktree}/evil > ${join(root, ".git", "worktrees", basename(worktree))}/commondir`,
+		],
+	],
+	// 入れ子のリポジトリの config に fsmonitor を仕込み、index に載せる。git status は載っているリポジトリの中でも git を起こす。
+	[
+		"入れ子のリポジトリ",
+		(_root: string, worktree: string) => [
+			"git init -q nested",
+			"git -C nested -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q --allow-empty -m nested",
+			`git -C nested config core.fsmonitor ${worktree}/fsm.sh`,
+			"git add nested",
+		],
+	],
+] as const) {
+	test(`親が差分を取るgitは、子がworktreeに仕込んだ設定 (${name}) を実行しても、親の作業ツリーにも隣のworktreeにも書けない`, { skip: cannotRun }, async () => {
+		const root = repo(`planted-${name}`);
+		const app = await session(root, "normal");
+		const input: Record<string, any> = { tasks: [{ agent: "worker", task: "a" }, { agent: "worker", task: "b" }], worktree: true };
+		assert.equal(await app.emit("tool_call", call(input)), undefined);
+		const [worktree, sibling] = input.tasks.map((task: { cwd: string }) => task.cwd);
+
+		process.env.PI_GUARD = JSON.stringify({ mode: "normal", root, git: join(root, ".git"), pid: process.pid + 1 });
+		process.chdir(worktree);
+		try {
+			const child = extensionHost();
+			child.ctx.hasUI = false;
+			guard(child.pi);
+			child.ctx.cwd = worktree;
+			await child.emit("session_start");
+			const script = `printf '#!/bin/sh\\ntouch ${worktree}/ran.txt ${root}/via-report.txt ${sibling}/via-report.txt\\n' > fsm.sh && chmod +x fsm.sh`;
+			await child.registeredTools.get("bash")!.execute("call-1", { command: [script, ...plant(root, worktree)].join("\n") }, undefined, undefined, child.ctx);
+		} finally {
+			process.chdir(home);
+			delete process.env.PI_GUARD;
+		}
+		// 仕込みが効いていることを、書ける場所つきの git で先に確かめる (効いていなければ、下の検証は何も見ていない)。
+		rmSync(join(worktree, "ran.txt"), { force: true });
+		git(worktree, "status", "--porcelain");
+		assert.equal(existsSync(join(worktree, "ran.txt")), true, "仕込んだスクリプトは git status で走る");
+		for (const made of [join(worktree, "ran.txt"), join(root, "via-report.txt"), join(sibling, "via-report.txt")]) rmSync(made, { force: true });
+
+		const patched = (await app.emit("tool_result", result())) as { content: Array<{ text: string }> };
+		assert.match(patched.content.at(-1)!.text, /guard\[worktree\]: worker ran in/);
+		// 書けない sandbox でも要約は取れている (git が起動に失敗して、何も走らなかっただけではない)。
+		assert.doesNotMatch(patched.content.at(-1)!.text, /Could not inspect it/);
+		assert.match(patched.content.at(-1)!.text, /fsm\.sh/);
+		assert.equal(existsSync(join(root, "via-report.txt")), false, "親の作業ツリーに書かれていない");
+		assert.equal(existsSync(join(sibling, "via-report.txt")), false, "隣の worktree に書かれていない");
+		assert.equal(existsSync(join(worktree, "ran.txt")), false, "見ている worktree にも書かせない");
+	});
+}

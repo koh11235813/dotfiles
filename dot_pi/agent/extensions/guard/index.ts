@@ -35,9 +35,9 @@
  */
 
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type BashSpawnHook, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition, type ExtensionAPI, type ExtensionContext, isToolCallEventType, type ToolCallEvent } from "@earendil-works/pi-coding-agent";
@@ -59,17 +59,25 @@ function head(subject: string): string {
 }
 
 /**
- * chezmoi の実体。PATH から探すが、相対の要素と、書ける場所の中にある候補 (symlink ならその先) は飛ばす。
- * sandbox の中から置ける場所のものを拾うと、次の edit / write で sandbox の外で実行される。
- * bwrap のように決まった絶対パスだけを見ないのは、chezmoi の置き場がホストごとに違う (Homebrew、pacman、
- * `~/.local/bin`) からで、見つからなければ下の規則が黙って効かなくなる。
+ * sandbox の外で起こす道具 (chezmoi と、ほかの拡張の git) の実体。PATH から探すが、相対の要素と、書ける場所の中にあるものは飛ばす。
+ * sandbox の中から置ける場所のものを拾うと、次に sandbox の外で実行される。
+ * 返すのは symlink を解いた先。PATH にあった候補のまま返すと、書ける場所に置いた symlink を、確かめた後で掛け替えられる。
+ * 先の名前が違うもの (mise の shim のように、呼ばれた名前で振る舞いを変えるもの) も飛ばす。先を直に起こすと別のコマンドになる。
+ * bwrap のように決まった絶対パスだけを見ないのは、置き場がホストごとに違う (Homebrew、pacman、`~/.local/bin`) からで、
+ * 見つからなければ chezmoi の規則が黙って効かなくなる。
  */
-function chezmoiBinary(writable: string[]): string | undefined {
+function binary(name: string, writable: string[]): string | undefined {
 	return (process.env.PATH ?? "")
 		.split(delimiter)
 		.filter(isAbsolute)
-		.map((entry) => join(entry, "chezmoi"))
-		.find((candidate) => existsSync(candidate) && !inside(writable, candidate));
+		.flatMap((entry) => {
+			try {
+				return [realpathSync.native(join(entry, name))];
+			} catch {
+				return [];
+			}
+		})
+		.find((found) => basename(found) === name && !inside(writable, found));
 }
 
 /**
@@ -79,9 +87,9 @@ function chezmoiBinary(writable: string[]): string | undefined {
  */
 function chezmoiManaged(writable: string[]): Set<string> {
 	try {
-		const binary = chezmoiBinary(writable);
-		if (!binary) return new Set();
-		const out = execFileSync(binary, ["managed", "--include=files", "--path-style=absolute"], {
+		const chezmoi = binary("chezmoi", writable);
+		if (!chezmoi) return new Set();
+		const out = execFileSync(chezmoi, ["managed", "--include=files", "--path-style=absolute"], {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
 			timeout: 5000,
@@ -181,6 +189,11 @@ const asksHome = (): string => join(homedir(), ".local", "state", "pi-guard");
 /** 緩い順。 */
 const STRICTNESS: PermissionMode[] = ["full", "normal", "ask", "readonly"];
 
+/** ほかの拡張がコマンドの準備を頼む口 (`pi.events`)。中身は `{ command, cwd, env, reply }`。 */
+export const BASH_CHANNEL = "guard:bash";
+/** ほかの拡張が、sandbox の外で起こす道具の実体を訊く口 (`pi.events`)。中身は `{ name, reply }`。 */
+export const BINARY_CHANNEL = "guard:binary";
+
 export default function (pi: ExtensionAPI) {
 	const inherited = inheritedState(process.env[GUARD_ENV], process.pid);
 	let mode: PermissionMode = inherited?.mode ?? "normal";
@@ -248,6 +261,13 @@ export default function (pi: ExtensionAPI) {
 		return inherited?.ask ? askParent(inherited.ask.dir, inherited.ask.parent, title, message) : undefined;
 	}
 
+	/**
+	 * sandbox の外で起こす道具を探すときに避ける場所 (binary)。この Pi の系統のどれかが sandbox の中から書ける場所。
+	 * full でも normal の書ける場所で見る。full に切り替える前に sandbox の中から置かれたものかもしれない。
+	 * worktree に絞られた子でも親の root で見る。親のモデルが親の root に置いたものかもしれない。
+	 */
+	const plantable = (): string[] => writeRoots("normal", inherited?.root ?? root, "", gitDir);
+
 	/** full では呼ばない。readonly の一時ディレクトリは sort など一時ファイルを作る道具が要るので、使うときに作る。 */
 	function roots(): string[] {
 		if (mode === "full") throw new Error("guard: full mode has no write roots.");
@@ -298,12 +318,41 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool(createBashToolDefinition(process.cwd(), { spawnHook: sandboxed }));
 	const monitor = registerMonitor(pi, sandboxed);
 
+	// ほかの拡張が自分で起こすコマンド (verify の検証コマンド) を、bash ツールと同じ準備に通す口。返すのは準備済みの
+	// command / cwd / env だけで、起こすのは頼んだ側。sandbox の部品 (書ける場所、launcher の引数) は外へ渡さない。
+	// 渡すと、境界を決める場所がここと頼む側の 2 つになる。
+	// 頼んでくるのは Pi のプロセスの中の拡張で、sandbox の中のコマンドからは届かない。頼まずに起こすこともできる相手なので、
+	// ここを通ることは強制できない (README の「できないこと」)。
+	// 固定の forbid は効かせる。confirm の規則と ask の確認は掛けない: 何を走らせるかを承認するのは頼んだ拡張の仕事で
+	// (verify なら `/verify add` を打った人)、ここで訊くと、人が登録したコマンドをタスクの終端のたびに訊き直すことになる。
+	pi.events.on(BASH_CHANNEL, (data) => {
+		const request = data as { command?: unknown; cwd?: unknown; env?: NodeJS.ProcessEnv; reply?: unknown } | null;
+		if (typeof request?.reply !== "function" || typeof request.command !== "string" || typeof request.cwd !== "string") return;
+		try {
+			const rule = evaluate(BASH_RULES, request.command);
+			if (rule?.decision === "forbid") throw new Error(`guard[${rule.id}]: ${rule.reason}`);
+			if (mode !== "full" && !sandboxAvailable()) throw new Error(`guard[sandbox]: The OS sandbox is unavailable, so nothing was run in ${mode} mode.`);
+			// readonly かどうかも返す。書けずに落ちたコマンドを、頼んだ側がコードの失敗として扱わないようにするため (verify)。
+			request.reply({ ...sandboxed({ command: request.command, cwd: request.cwd, env: request.env ?? process.env }), readonly: mode === "readonly" });
+		} catch (error) {
+			request.reply({ error: (error as Error).message });
+		}
+	});
+
+	// ほかの拡張が sandbox の外で起こす道具 (checkpoint と verify の git) の実体を訊く口。名前だけで起こすと PATH を探し、
+	// PATH の要素が書ける場所の中にあれば (root の中の `.venv/bin`、mise の shims)、モデルの置いたものが sandbox の外で走る。
+	// 見つからなければ undefined を返す。返事が無い (guard が居ない) のとは別で、頼んだ側は名前で起こし直さない。
+	pi.events.on(BINARY_CHANNEL, (data) => {
+		const request = data as { name?: unknown; reply?: unknown } | null;
+		if (typeof request?.reply === "function" && typeof request.name === "string") request.reply(binary(request.name, plantable()));
+	});
+
 	/**
-	 * subagent の worktree のための git を走らせる (worktree.ts)。full 以外では bash と同じ sandbox の中。
+	 * subagent の worktree のための git を走らせる (worktree.ts)。full 以外では sandbox の中で、どの sandbox かは下の 2 つが決める。
 	 * Pi のプロセスでそのまま打たないのは、子が書いた後の作業ツリーと `.git` の上で git を動かすことになるから。
 	 */
-	const git: Run = async (script, args) => {
-		const argv = mode === "full" ? [] : sandboxArgv(roots(), readDenied(), gitLocks(root, gitDir));
+	const gitIn = (sandbox: () => string[] | undefined): Run => async (script, args) => {
+		const argv = mode === "full" ? [] : sandbox();
 		if (!argv) throw new Error(`guard[sandbox]: no OS sandbox on ${process.platform}.`);
 		const [command, ...rest] = [...argv, "/bin/bash", "-c", script, "bash", ...args];
 		try {
@@ -312,6 +361,13 @@ export default function (pi: ExtensionAPI) {
 			throw new Error(String((error as { stderr?: string }).stderr || (error as Error).message).trim());
 		}
 	};
+	// worktree を作る git は bash と同じ sandbox。root と git の common dir に書く。
+	const git = gitIn(() => sandboxArgv(roots(), readDenied(), gitLocks(root, gitDir)));
+	// 子が終わった後の差分を取る git は、どこにも書けない sandbox で打つ。子は自分の worktree の中に、その上で走る git が
+	// 実行する設定を用意できる (向け直した commondir の先の config、index に載せた入れ子のリポジトリの config)。
+	// bash と同じ書ける場所つきで打つと、子の用意したスクリプトが親の root と隣の worktree に書く。
+	// 設定を 1 つずつ無効にする (`-c core.fsmonitor=false` など) 道は取らない。git がコマンドを起こす設定は数え切れない。
+	const inspect = gitIn(() => sandboxArgv([], readDenied()));
 	/** worktree つきで通した subagent の呼び出し。結果が来たら差分を付ける。 */
 	const worktrees = new Map<string, Worktree[]>();
 
@@ -400,7 +456,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.toolName !== "subagent") return undefined;
 		const made = worktrees.get(event.toolCallId);
-		const isolated = made ? [{ type: "text" as const, text: await report(git, made) }] : [];
+		const isolated = made ? [{ type: "text" as const, text: await report(inspect, made) }] : [];
 		const reported: unknown = (event.details as { results?: unknown } | undefined)?.results;
 		const found = Array.isArray(reported) ? reported : partials.get(event.toolCallId);
 		partials.delete(event.toolCallId);
@@ -438,7 +494,8 @@ export default function (pi: ExtensionAPI) {
 		// worktree に絞られた子が起こす孫は、PI_GUARD の root (親の root) を継ぎ、自分の cwd から絞り直す。worktree の外を
 		// cwd に指定されると、孫は親の root や隣の worktree に書ける。相対の cwd は sample が spawn にそのまま渡すので、taskRoot と同じく Pi の cwd から数える。
 		if (inherited && root !== inherited.root) {
-			const escaping = [input, ...(input.tasks ?? []), ...(input.chain ?? [])].find((task) => task.cwd !== undefined && taskRoot(inherited.root, String(task.cwd)) !== root);
+			// 孫が絞られる先が自分の worktree の中 (自分の worktree そのものか、その中の worktree) なら通す。
+			const escaping = [input, ...(input.tasks ?? []), ...(input.chain ?? [])].find((task) => task.cwd !== undefined && !inside([root], taskRoot(inherited.root, String(task.cwd)) ?? inherited.root));
 			if (escaping) {
 				return { block: true, reason: `guard[worktree]: cwd ${String(escaping.cwd)} is outside this session's worktree (${root}), and a subagent started there could write outside it. No subagent was started. Do not retry or route around this; delegate without cwd, or with a cwd inside the worktree.` };
 			}
@@ -468,8 +525,7 @@ export default function (pi: ExtensionAPI) {
 			rule = evaluate(BASH_RULES, subject);
 		} else if (isToolCallEventType("edit", event) || isToolCallEventType("write", event)) {
 			subject = targetPath(event.input.path, ctx.cwd);
-			// full でも normal の書ける場所を除く。full に切り替える前に sandbox の中から置かれたものかもしれない。
-			const rules = [...PATH_RULES, chezmoiTarget(chezmoiManaged(writeRoots("normal", root, "", gitDir)))];
+			const rules = [...PATH_RULES, chezmoiTarget(chezmoiManaged(plantable()))];
 			// edit は書く前に読み、結果の diff で周りの行を返す。
 			if (mode !== "full" && event.toolName === "edit") rules.push(readDeniedPath(readDenied()));
 			if (mode === "normal" || mode === "ask") rules.push(gitLocked(gitLocks(root, gitDir)), outsideRoots(roots()));

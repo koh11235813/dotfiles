@@ -301,6 +301,62 @@ test("リポジトリの設定に仕込まれた hook と fsmonitor は走らせ
 	assert.deepEqual(readdirSync(marks), []);
 });
 
+// 設定に書いた hook (hook.<名前>.event / command) は hooks ディレクトリを見ないので、core.hooksPath では止まらない。
+for (const [name, config] of [
+	[".git/config", (dir: string) => join(dir, ".git", "config")],
+	// Linux の sandbox は、無い `.git/commondir` を新しく作ることを止められない (guard の README の「できないこと」)。
+	[
+		"commondir を向け直した先の config",
+		(dir: string) => {
+			execFileSync("cp", ["-r", join(dir, ".git"), join(dir, ".evil")]);
+			writeFileSync(join(dir, ".git", "commondir"), `${join(dir, ".evil")}\n`);
+			return join(dir, ".evil", "config");
+		},
+	],
+] as const) {
+	test(`リポジトリの設定 (${name}) に書かれた hook は、基準を取るときも戻すときも走らせない`, async () => {
+		const dir = repo();
+		const marks = mkdtempSync(join(base, "marks-"));
+		const file = config(dir);
+		for (const [hook, event] of [["x", "post-index-change"], ["y", "post-checkout"]]) {
+			git(dir, "config", "-f", file, `hook.${hook}.event`, event);
+			git(dir, "config", "-f", file, `hook.${hook}.command`, `touch '${join(marks, event)}'`);
+			// 設定の側で有効と書かれていても、止めるほうが勝つ。
+			git(dir, "config", "-f", file, `hook.${event}.enabled`, "true");
+		}
+		const app = await start(dir);
+		assert.deepEqual(readdirSync(marks), [], "基準を取る git add で走っていない");
+		await app.piWrites("a.txt", "pi\n");
+		await app.command("checkpoint");
+		assert.match(app.lastNotice(), /M\s+a\.txt/);
+		await app.command("checkpoint", "restore a.txt");
+		assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "a\n");
+		assert.deepEqual(readdirSync(marks), []);
+	});
+}
+
+// promisor remote を仕込んで object を 1 つ消すと、git は欠けた object を取りに行き、そのとき remote の設定がコマンドを起こす。
+for (const [name, plant] of [
+	["ext:: の transport", (dir: string, mark: string) => [["protocol.ext.allow", "always"], ["remote.origin.url", `ext::sh -c touch% ${mark}`]]],
+	["core.sshCommand", (dir: string, mark: string) => [["core.sshCommand", `touch ${mark}; false`], ["remote.origin.url", "ssh://nowhere.invalid/repo"]]],
+] as const) {
+	test(`リポジトリの設定に仕込まれた promisor remote (${name}) があっても、欠けた object を取りに行かない`, async () => {
+		const dir = repo();
+		const mark = join(mkdtempSync(join(base, "marks-")), "fetched");
+		const app = await start(dir);
+		await app.piWrites("a.txt", "pi\n");
+		const blob = git(dir, "rev-parse", "HEAD:a.txt").trim();
+		for (const [key, value] of [...plant(dir, mark), ["remote.origin.promisor", "true"], ["extensions.partialClone", "origin"]]) git(dir, "config", key, value);
+		rmSync(join(dir, ".git", "objects", blob.slice(0, 2), blob.slice(2)));
+		// 基準の中身が欠けているので、差分は失敗してよい。
+		for (const args of ["", "diff a.txt", "restore a.txt"]) await app.command("checkpoint", args).catch(() => {});
+		assert.equal(existsSync(mark), false, "remote の設定からコマンドが起きていない");
+		// 欠けたまま git restore を打つと、git は a.txt を消してから失敗する。
+		assert.match(app.lastNotice(), /a\.txt の基準の中身を git から読めないので戻さない/);
+		assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
+	});
+}
+
 test("リポジトリの設定に仕込まれた filter は走らせず、その filter が掛かるファイルは戻さない", async () => {
 	const dir = repo({ "a.txt": "a\n", "b.md": "b\n" });
 	const marks = mkdtempSync(join(base, "marks-"));

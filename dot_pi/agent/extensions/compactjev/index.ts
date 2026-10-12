@@ -209,7 +209,8 @@ function pinTail(target: LogTarget): void {
 			const keep = room - 1 - `[… ${line.length} chars dropped by compactjev] `.length;
 			// ほかに行が無ければ、採点で選ぶ分の予算が丸ごと余る。頭を捨てると Pi 単体の頭 2000 字より 1400 字多く失う。
 			const head = lines.length === 1 ? line.slice(0, KEEP_CHARS - ERROR_TAIL_CHARS) : "";
-			block.lines[index] = `${head && `${head} `}[… ${line.length - head.length - keep} chars dropped by compactjev] ${line.slice(-keep)}`;
+			// 頭と終わりで行が尽きるなら、落とすものが無い。切ると同じ字を両方に載せ、落とした字数が負の印になる。
+			if (head.length + keep < line.length) block.lines[index] = `${head && `${head} `}[… ${line.length - head.length - keep} chars dropped by compactjev] ${line.slice(-keep)}`;
 			block.pinned[index] = true;
 			break;
 		}

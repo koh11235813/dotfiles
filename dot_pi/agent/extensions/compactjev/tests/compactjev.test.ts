@@ -157,6 +157,14 @@ test("失敗した出力が長い 1 行だけなら、終わりに加えて頭�
 	assert.ok(textOf(filtered).length > 1700 && textOf(filtered).length <= 2000);
 });
 
+test("失敗した出力の 1 行が頭と終わりの枠に収まる長さなら、切らずにそのまま残す", async () => {
+	const { filter } = await host();
+	// 行は 1700 字で、空白だけの行を足して全体は 2000 字を超える。頭 1200 字と終わり約 560 字を別々に取ると重なる。
+	const line = `HEAD-${"x".repeat(1690)}-TAIL`;
+	const [filtered] = await filter([failedResult(`${line}\n${" \n".repeat(200)}`)]);
+	assert.equal(textOf(filtered), line);
+});
+
 test("失敗した出力は Jev の採点が欠けても、頭と末尾を残して絞る", async () => {
 	const { app, filter } = await host((lines) => (lines.includes("step 50: compiling module number 50") ? { stopReason: "error", errorMessage: "boom", answers: {} } : answer(lines, () => 0.5)));
 	const succeeded = toolResult("bash", LOG);

@@ -1,7 +1,8 @@
 /**
  * 完了前の自動検証。人が project ごとに登録したコマンドを、ファイルを変えたタスクの終端で走らせる。
  *
- * 権限の境界ではない。登録したコマンドは guard の sandbox の外で、Pi と同じ権限で走る。
+ * 自分では権限の境界を持たない。guard が読み込まれていれば、登録したコマンドは guard に準備を頼み、bash ツールと同じ
+ * sandbox の中で走らせる (下の prepare)。guard が無ければ、Pi と同じ権限で走る。
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -9,7 +10,7 @@ import { dirname, join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { run } from "./run.ts";
-import { fingerprint, type Project, project } from "./worktree.ts";
+import { fingerprint as fingerprintWith, type Project, project as projectWith } from "./worktree.ts";
 
 /** 設定の口ではない。テストが短くするために外から触れる形にしてある。 */
 export const limits = {
@@ -18,6 +19,14 @@ export const limits = {
 	/** 1 つのタスクで、失敗をモデルへ差し戻す回数。 */
 	maxFixes: 2,
 };
+
+/** guard がコマンドの準備を引き受ける口 (guard/index.ts の BASH_CHANNEL)。 */
+const GUARD_BASH = "guard:bash";
+/** guard の monitor が知らせを受け取る口 (guard/monitor/index.ts の EVENT_CHANNEL)。 */
+const MONITOR_EVENT = "monitor:event";
+/** guard に、sandbox の外で起こす道具の実体を訊く口 (guard/index.ts の BINARY_CHANNEL)。 */
+const GUARD_BINARY = "guard:binary";
+type Prepared = { command: string; cwd: string; env: NodeJS.ProcessEnv; readonly?: boolean };
 
 type Store = { version: 1; projects: Record<string, string[]> };
 
@@ -76,6 +85,27 @@ export default function (pi: ExtensionAPI) {
 	/** 走っている検証。止める口と、止まり切るのを待つ口。走っていなければ無し。 */
 	let running: { controller: AbortController; done: Promise<void> } | undefined;
 
+	/**
+	 * ファイル状態を取る git の実体。guard が居れば guard に訊く。名前だけで起こすと PATH を探し、PATH の要素が sandbox の中から
+	 * 書ける場所にあると (root の中の `.venv/bin`、mise の shims)、モデルの置いた git がここ (sandbox の外) で走る。
+	 * 返事が無ければ guard は居ない。sandbox も無いので、名前のまま起こす。
+	 * 「無い」という返事なら起こさず、リポジトリの外と同じに扱う。名前で起こし直すと、guard が飛ばした候補を拾う。
+	 */
+	function gitBinary(): string | undefined {
+		let binary: string | undefined = "git";
+		pi.events.emit(GUARD_BINARY, { name: "git", reply: (found?: string) => (binary = found) });
+		return binary;
+	}
+	// 引数を省くと名前のまま起こすので、「無い」をそのまま渡さない。
+	const project = (cwd: string): Project | undefined => {
+		const binary = gitBinary();
+		return binary ? projectWith(cwd, binary) : undefined;
+	};
+	const fingerprint = (root: string): string | undefined => {
+		const binary = gitBinary();
+		return binary ? fingerprintWith(root, binary) : undefined;
+	};
+
 	/** 登録のある project でだけ出す。無い project で「未実行」を出し続けても、読む人にできることが無い。 */
 	const show = (ctx: ExtensionContext, where: Project | undefined, text = describe(verdict)) => ctx.ui.setStatus("verify", where && registered(where.id).length ? text : undefined);
 
@@ -112,6 +142,18 @@ export default function (pi: ExtensionAPI) {
 		task = { project: where, start, before: verdict, fixes: 0 };
 	});
 
+	/**
+	 * guard が居れば、bash ツールと同じ準備 (モードごとの sandbox) を通した形にしてもらう。居なければ、そのまま起こす形を返す。
+	 * 返事は emit の中で来る。Pi のイベントバスは聞き手を emit の中で同期に呼ぶ (dist/core/event-bus.js) ので、
+	 * emit から戻った時点で返事が無ければ、guard は読み込まれていない。
+	 * guard の sandbox の部品を import しないのは、境界を guard の中の 1 つに保つため。チャンネルの名前だけを合わせる。
+	 */
+	function prepare(command: string, cwd: string): Prepared | { error: string } {
+		let answer: Prepared | { error: string } = { command, cwd, env: process.env };
+		pi.events.emit(GUARD_BASH, { command, cwd, env: process.env, reply: (given: typeof answer) => (answer = given) });
+		return answer;
+	}
+
 	/** 登録順に走らせ、最初の失敗で止める。 */
 	async function check(ctx: ExtensionContext, where: Project, current: string): Promise<{ verdict: Verdict; feedback?: string }> {
 		const commands = registered(where.id);
@@ -123,11 +165,17 @@ export default function (pi: ExtensionAPI) {
 		const unlisten = ctx.mode === "tui" ? ctx.ui.onTerminalInput((data) => (matchesKey(data, "escape") ? void controller.abort() : undefined)) : undefined;
 		try {
 			for (const [index, command] of commands.entries()) {
+				const prepared = prepare(command, where.root);
+				// 断られたものを sandbox なしで走らせない。コードの失敗ではないので、失敗 (モデルへ差し戻す) にもしない。
+				if ("error" in prepared) return { verdict: { state: "not_run", reason: `${command} を guard が通さなかった: ${prepared.error}` } };
 				show(ctx, where, `検証: 実行中 (${index + 1}/${commands.length} ${command})`);
-				const result = await run(command, where.root, { timeoutMs: limits.timeoutMs, signal: controller.signal });
+				const result = await run(prepared.command, prepared.cwd, { timeoutMs: limits.timeoutMs, signal: controller.signal, env: prepared.env });
 				if (result.ended === "cancelled") return { verdict: { state: "interrupted", reason: `${command} の途中で止めた` } };
 				if (result.ended === "exited" && result.code === 0) continue;
 				const how = result.ended === "timed_out" ? `timeout (${limits.timeoutMs / 1000} 秒)` : result.code === null ? "起動できないかシグナルで終わった" : `終了コード ${result.code}`;
+				// readonly の sandbox では、書けずに落ちたのか、コードのせいで落ちたのかを見分けられない (出力はコマンドのもので、当てにできない)。
+				// どちらでも、readonly のモデルは何も書けず直せないので、差し戻す文面を作らない。
+				if (prepared.readonly) return { verdict: { state: "failed", ...ran, reason: `${command}: ${how}。readonly の sandbox の中で走らせたので、書けずに落ちたのかもしれない。モデルへは戻していない` } };
 				return {
 					verdict: { state: "failed", ...ran, reason: `${command}: ${how}` },
 					feedback: [`コマンド: ${command}`, `結果: ${how}`, "出力の末尾:", result.tail].join("\n"),
@@ -160,7 +208,7 @@ export default function (pi: ExtensionAPI) {
 		// 走っている間に変わったなら、コマンドが見たのは混ざった状態。成功にも、モデルへ戻す失敗にも使わない。
 		verdict = checked.verdict.state !== "interrupted" && fingerprint(task.project.root) !== current ? { state: "not_run", reason: "検証中にファイルが変わった" } : checked.verdict;
 		show(ctx, task.project);
-		if (verdict.state !== "failed") return;
+		if (verdict.state !== "failed" || !checked.feedback) return;
 		// エラーで終わったタスクを続行させても、同じエラーに当たるだけ。
 		if (event.outcome !== "completed") return;
 		if (task.fixes >= limits.maxFixes) {
@@ -195,7 +243,21 @@ export default function (pi: ExtensionAPI) {
 		const unchecked = "fingerprint" in verdict ? verdict.fingerprint !== current : verdict === task.before && current !== task.start;
 		if (unchecked) verdict = { state: "not_run", reason: event.aborted ? "タスクが中断されたので確かめていない" : "確かめないままタスクが終わった" };
 		show(ctx, task.project);
-		if (verdict !== task.before && registered(task.project.id).length) ctx.ui.notify(describe(verdict), verdict.state === "passed" ? "info" : "warning");
+		if (verdict !== task.before && registered(task.project.id).length) {
+			ctx.ui.notify(describe(verdict), verdict.state === "passed" ? "info" : "warning");
+			// 成功だけを、guard の monitor の入口からモデルにも伝える (guard が居なければ誰も聞いていない)。monitor の知らせの種類に
+			// 失敗は無く、直すべき失敗は agent_before_settle で既に戻している。wake: false にしないと、成功の知らせが次のターンを起こす。
+			// id は成功 1 回ごとに変える。ファイル状態だけにすると、同じ状態に戻って通り直した成功を monitor が重複として捨てる。
+			if (verdict.state === "passed") {
+				pi.events.emit(MONITOR_EVENT, {
+					kind: "verified",
+					source: "verify",
+					id: `${verdict.fingerprint}@${Date.now()}`,
+					summary: `登録したコマンドが全部通った: ${registered(task.project.id).join("; ")}`,
+					wake: false,
+				});
+			}
+		}
 		task = undefined;
 	});
 

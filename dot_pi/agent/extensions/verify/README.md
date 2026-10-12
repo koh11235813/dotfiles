@@ -34,6 +34,8 @@ project の中 (`.pi/` など) には置かない。そこはモデルが edit /
 4. 失敗したら、コマンド・終わり方・出力の末尾 (80 行・8 KiB まで) を `verify` という custom message にして `continue: true` を返す。モデルがもう 1 度動き、2 に戻る。
 5. `agent_settled` で最終結果を `ctx.ui.notify` で 1 度だけ知らせる。途中の失敗では知らせない。結果が前と変わらなかったタスク (変更なし) でも知らせない。
 
+成功で終わったときだけ、guard の monitor の入口 (`pi.events` の `monitor:event`) に `verified` の知らせを 1 つ流す。monitor がそれを次のターンに添えるので、モデルも「検証コマンドが、走った時点のファイルに対して通った」ことを知る。ターンは起こさない (`wake: false`)。失敗・未実行・中断は流さない。monitor の知らせの種類に失敗は無く、直すべき失敗は 4 で既にモデルへ戻している。guard が読み込まれていなければ、誰も聞いていないので何も起きない。
+
 `agent_before_settle` の時点で、他の拡張が続行を決めているか、入力 (steer / follow-up) が待っているときは走らせない。モデルがまだ動くので、確かめるのは次の境界に回す。
 他の拡張の続行を Pi が退けて次の境界が来なかったときは、`agent_settled` で未実行にする。
 エラーで終わったタスク (`outcome` が `error`) も確かめるが、モデルへは戻さない。
@@ -62,6 +64,32 @@ project の中 (`.pi/` など) には置かない。そこはモデルが edit /
 | タスクが中断されたので確かめていない | Esc で止めたタスクがファイルを変えていた。Pi は中断したタスクに `agent_before_settle` を送らない |
 | 確かめないままタスクが終わった | ファイルを変えたタスクが、検証を後に回したまま終わった |
 | git からファイル状態を取れなかった | `git ls-files` が失敗した |
+| コマンド を guard が通さなかった: 理由 | guard が準備を断った (full 以外で OS の sandbox が使えない、固定の禁止に当たる)。sandbox なしでは走らせず、モデルへも戻さない |
+
+## guard の sandbox とモード
+
+guard が読み込まれていれば、検証コマンドは guard に準備を頼んでから起こす。bash ツールと同じ準備を通るので、`/permissions` のモードに従う。
+
+| モード | 検証コマンド |
+| --- | --- |
+| `full` | sandbox なし |
+| `normal` / `ask` | bash ツールと同じ sandbox の中。書けるのは guard の書ける場所だけで、読ませない場所は読めない |
+| `readonly` | 読み取り専用の sandbox の中 (専用の `TMPDIR` だけ書ける)。失敗してもモデルへ差し戻さない |
+
+- 繋ぎ方は Pi のイベントバス。`pi.events.emit("guard:bash", { command, cwd, env, reply })` で頼むと、guard が `reply` に準備済みの `command` / `cwd` / `env` と、readonly かどうか (`readonly`) を渡すので、それを `/bin/bash -c` で起こす。返事が無ければ guard は居ないので、今までどおりそのまま起こす。guard の sandbox の部品を import する案は捨てた (境界を決める場所が 2 つになる)。
+- **ask でも確認は出さない。** 承認は `/verify add` を打った時点で済んでいる。タスクの終端のたびに訊き直すと、自動で確かめる意味が無くなる。モデルが書き換えられるのはコマンドが実行する中身 (テストコードなど) のほうで、それは sandbox が囲う。
+- **readonly では、失敗をモデルへ差し戻さない。** readonly のモデルは edit / write も bash での書き込みもできないので、検証が走るのは人か別のプロセスがファイルを変えたときだけで、差し戻しても直せる相手がいない。そのうえ、作業ツリーや `/tmp` に書く検証コマンドは、コードが正しくても sandbox のせいで落ちる。この dotfiles の `node dot_pi/agent/tests/run.mjs` も、`/tmp` に直に一時ディレクトリを作るテストが 1 つ `EROFS` で落ち、残りは通る (Arch で実測)。表示は `検証: 失敗 (コマンド: 終わり方。readonly の sandbox の中で走らせたので、書けずに落ちたのかもしれない。モデルへは戻していない)` にする。
+  - 書けずに落ちたのか、コードのせいで落ちたのかは見分けていない。出力の末尾は検証コマンドのもので、当てにできない。
+  - 捨てた案: readonly では走らせない (未実行にする)。読むだけの検証コマンド (型検査、lint) まで走らなくなり、guard が readonly 用に準備する口 (専用の `TMPDIR`) も要らなくなる。
+- **guard の固定の禁止 (force push) は効く。** 確認つきの規則 (`rm`、`git push` など) は、上と同じ理由で訊かない。
+- guard が準備を断ったら走らせず、`検証: 未実行 (コマンド を guard が通さなかった: 理由)` にする。
+- settings.json の `shellPath` と `shellCommandPrefix` も、bash ツールと同じに効く。
+- guard の root は Pi を起動したディレクトリで、検証コマンドは作業ツリーの最上位で走る。リポジトリの下の階層で Pi を起動すると、検証コマンドが root の外 (同じリポジトリの別のディレクトリ) に書こうとして失敗する。
+- **`.git` を持つディレクトリを消して作り直す検証コマンドは、normal / ask では 2 回目から失敗する。** guard は root の下で見つけたリポジトリ (3 段下まで) の `.git/hooks` と `.git/config` を sandbox の中から消せなくしている (guard の README の「書かせない git の場所」)。`rm -rf build` で CMake の FetchContent の checkout (`build/_deps/<名前>-src`) ごと消す、`git clean -ffdx` を打つ、テストの中で固定の場所に `git clone` し直す、といったコマンドは、前の実行が残したリポジトリを消せず `Device or resource busy` で終わる。検証は失敗になり、タスクのたびにモデルへ 2 回差し戻される。guard の側で塞ぐ範囲を狭めるかどうかは未決 (guard の README)。それまでは、そういうコマンドは登録しないか、full で使う。
+- **検証が走っている間に `/permissions` を厳しい側へ変えても、走っている検証コマンドは止まらない。** sandbox は起動したときのモードで決まり、走っている間は変えられない。monitor の job はこのとき止めるが、検証コマンドは前面の bash ツールと同じ扱いで、起動したときのモードの sandbox のまま最後まで走る (normal で起こした検証は、readonly に変えた後も root に書ける)。書いた場合の結果は「検証中にファイルが変わった」で捨てる。すぐ止めたいときは `/verify stop`。guard から verify へ「止めろ」と伝える口は作っていない。
+- **guard が準備した sandbox が、走らせる段で起動しなかったときは「失敗」になり、モデルへ差し戻す。** guard が準備を断ったとき (上) は未実行にするが、準備が通った後で launcher が起動に失敗したとき (user namespace を後から止められた、など) は、verify からはコマンドが 0 以外で終わったようにしか見えない。出力の末尾に guard の `guard[sandbox]: The OS sandbox did not start, so nothing was executed ... Stop and tell the user` が付くので、モデルは「原因を直すこと」と「止まって利用者に伝えること」の両方を受け取る。何も実行されていないのに、表示は未実行でなく失敗になる。末尾の文面で見分ける案は捨てた: 末尾は検証コマンドの出力で、モデルが書き換えられるテストコードが同じ文を出せば、本物の失敗を未実行にして差し戻しを避けられる。終了コードも、コマンド自身が同じ値を出せる。見分けるには、guard が印 (起動したかどうか) を返事と別の道で渡す必要があり、`guard:bash` の形が変わる。入れていない。起きるのは、タスクの途中で sandbox が壊れたか、sandbox が使えない間に人や `!` がファイルを変えたとき。
+- sandbox の中の検証を止めるとき (`/verify stop`、timeout)、中身は SIGTERM を受けずに消える。bubblewrap の launcher が死ぬと中身ごと消えるためで、コマンドの `trap` の後始末は走らない。
+- Arch (bubblewrap 0.13.0) で確かめたこと: この dotfiles の `node dot_pi/agent/tests/run.mjs` は normal の sandbox の中でも全部通る (guard のテストが起こす bubblewrap は入れ子で動く)。sandbox の中の `sleep` を `/verify stop` と timeout で止めると、プロセスは残らない。
 
 ## ファイル状態
 
@@ -90,8 +118,12 @@ git が無視していないファイル (追跡済みと未追跡) のパス・
 
 ## できないこと
 
-- **guard の sandbox とモード判定を通らない。** 検証コマンドは拡張のプロセスから直接起こすので、`/permissions` が readonly でも、Pi と同じ権限で走り、書き込める。guard が包むのは自分のツール (bash、monitor) だけで、他の拡張から sandbox を借りる口が無い。
-- **承認しているのはコマンドの文字列で、それが実行する中身ではない。** 登録したコマンドが読むテストコード・`package.json` の scripts・Makefile などは root の中にあり、モデルが edit / write で確認なしに書き換えられる。その中身が、タスクの終端で、確認なしに、guard の sandbox の外で走る。normal の bash からは読めない・書けない場所 (`~/.ssh`、`~/.zshrc`、`verify.json` 自身など) にも届く。verify の中からは塞げない (上の項目と同じ理由)。信用できないタスクでは登録を外しておく。
+- **guard が読み込まれていないと、検証コマンドは Pi と同じ権限で走る。** sandbox を持つのは guard だけで、verify は頼むことしかしない。guard の読み込みに失敗した Pi でも、黙ってそのまま走らせる (guard が居ないことと、頼めなかったことを見分ける口が無い)。
+- **承認しているのはコマンドの文字列で、それが実行する中身ではない。** 登録したコマンドが読むテストコード・`package.json` の scripts・Makefile などは root の中にあり、モデルが edit / write で確認なしに書き換えられる。その中身が、タスクの終端で、確認なしに走る。guard があれば normal 以下では sandbox の中なので、届くのは bash ツールと同じ範囲まで。full と guard の無い Pi では、`~/.ssh`、`~/.zshrc`、`verify.json` 自身などにも届く。信用できないタスクでは登録を外しておく。
+- **ファイル状態を取る git は sandbox の外で走る。** `git rev-parse` と `git ls-files` を拡張のプロセスから直接起こしている (`core.fsmonitor` は無効にしている)。登録が 1 つも無くても、ターンの始めにリポジトリを探す `git rev-parse` は走る。
+  - git の実体は guard に訊く (Pi のイベントバスの `guard:binary`)。名前だけで起こすと PATH を探し、PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin`、mise の shims)、モデルが bash でそこに置いた `git` が、次のターンの始めに sandbox の外で走った (レビューでの実測)。guard は PATH の相対の要素と書ける場所の中にあるものを飛ばし、symlink を解いた先を返す (guard の README の「そのほかの決めごと」)。
+  - 書ける場所の外に git が無いホスト (mise で入れた git しか無い、など) では git を起こさず、リポジトリの外と同じ扱いになる (`/verify` は「git リポジトリの外では使えない」と出し、検証は走らない)。理由を分けた文面にはしていない。
+  - guard が読み込まれていなければ sandbox も無いので、今までどおり名前で起こす。
 - **`verify.json` を書けるモードでは、モデルが登録を書き換えられる。** full では止めるものが無い。normal 以下では guard が `~/.pi` を書ける場所に足していない (`guard/sandbox.ts` の `EXTRA_WRITE_PATHS`) が、`~/.pi` を含む場所で Pi を起動すれば書ける。
 - **git リポジトリの外では使えない。** ファイル状態を git の一覧から作るため。`/verify add` は断る。
 - **複数の Pi が同時に `/verify add` / `remove` すると、後から書いた方が残る。** 読んでから書くまでの間に鍵を掛けていない。

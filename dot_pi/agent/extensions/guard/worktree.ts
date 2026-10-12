@@ -51,12 +51,18 @@ const real = (path: string): string => {
 /**
  * cwd が root の下の worktree の中なら、その worktree。子の guard が、書ける場所を親の root から自分の worktree に絞るのに使う。
  * 見るのは場所だけで、本当に worktree かは確かめない。絞る向きにしか働かないので、誰が作ったディレクトリでも広がらない。
+ * worktree の中の置き場にさらに worktree があれば、いちばん内側のものを返す。worktree に絞られた子が `worktree: true` で起こす
+ * 孫の置き場は子の worktree の中で、1 段目で止めると孫がみな子の worktree 全体に書け、孫どうしが分かれない。
  */
 export function taskRoot(root: string, cwd: string): string | undefined {
-	const home = join(real(root), WORKTREES_DIR);
-	const below = relative(home, real(cwd));
-	if (!below || below.startsWith("..") || isAbsolute(below)) return undefined;
-	return join(home, below.split(sep)[0]);
+	const target = real(cwd);
+	let found: string | undefined;
+	for (let outer = real(root); ; outer = found) {
+		const home = join(outer, WORKTREES_DIR);
+		const below = relative(home, target);
+		if (!below || below.startsWith("..") || isAbsolute(below)) return found;
+		found = join(home, below.split(sep)[0]);
+	}
 }
 
 // 置き場に `*` だけの .gitignore を置く。元の作業ツリーの status に未追跡として出続けると、`git add -A` で巻き込まれる。

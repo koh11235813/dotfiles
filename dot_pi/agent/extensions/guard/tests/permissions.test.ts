@@ -72,6 +72,30 @@ test("sandboxが使えなければfull以外のbash・edit・writeは遮断し�
 	}
 });
 
+test("ほかの拡張から頼まれたコマンドの準備も、sandboxが使えなければfull以外では断る", async () => {
+	const app = extensionHost();
+	guard(app.pi);
+	await app.emit("session_start");
+	const prepare = (command: string) => {
+		let answer: { command?: string; error?: string } | undefined;
+		app.pi.events.emit("guard:bash", { command, cwd: app.ctx.cwd, env: process.env, reply: (given: typeof answer) => (answer = given) });
+		return answer;
+	};
+	sandbox.available = false;
+	try {
+		for (const mode of ["normal", "ask", "readonly"]) {
+			await app.command("permissions", mode);
+			assert.match(prepare("pwd")?.error ?? "", /^guard\[sandbox\].*unavailable/, mode);
+		}
+		await app.command("permissions", "full");
+		assert.equal(prepare("pwd")?.command, "pwd");
+	} finally {
+		sandbox.available = true;
+	}
+	// 形の合わない頼みには返事をしない (頼んだ側は guard が居ないときと同じ扱いになる)。
+	assert.doesNotThrow(() => app.pi.events.emit("guard:bash", { command: 1 }));
+});
+
 test("権限モードは再開とtreeで復元され、新規セッションはnormalに戻る", async () => {
 	const app = extensionHost();
 	guard(app.pi);
@@ -299,6 +323,46 @@ test("chezmoiは書ける場所の外にあるPATHの要素からだけ探し、
 	}
 });
 
+test("ほかの拡張がsandboxの外で起こす道具の実体は、書ける場所の外にあるものだけを、symlinkを解いた先で答える", async () => {
+	const root = dir("binary", "project");
+	const tool = (bin: string) => {
+		writeFileSync(join(bin, "tool"), "#!/bin/sh\n", { mode: 0o755 });
+		return bin;
+	};
+	const planted = tool(dir("binary", "project", ".venv", "bin"));
+	const trusted = tool(dir("binary", "bin"));
+	// 書ける場所に置いた symlink は、確かめた後で掛け替えられる。答えるのはその先。
+	const linked = dir("binary", "project", "links");
+	symlinkSync(join(trusted, "tool"), join(linked, "tool"));
+	// 呼ばれた名前で振る舞いを変えるもの (mise の shim)。先を直に起こすと別のコマンドになる。
+	const shims = dir("binary", "shims");
+	writeFileSync(join(trusted, "multi"), "#!/bin/sh\n", { mode: 0o755 });
+	symlinkSync(join(trusted, "multi"), join(shims, "tool"));
+	const path = process.env.PATH;
+	const app = extensionHost();
+	guard(app.pi);
+	app.ctx.cwd = root;
+	await app.emit("session_start");
+	const ask = (name: unknown) => {
+		let answer: string | undefined | null = null;
+		app.pi.events.emit("guard:binary", { name, reply: (given?: string) => (answer = given) });
+		return answer;
+	};
+	try {
+		for (const mode of ["normal", "full"]) {
+			await app.command("permissions", mode);
+			process.env.PATH = [".", "", planted, shims, linked, path].join(":");
+			assert.equal(ask("tool"), join(trusted, "tool"), mode);
+			// 見つからないときは「無い」と答える。返事が無い (guard が居ない) のとは別。
+			process.env.PATH = [".", "", planted, shims].join(":");
+			assert.equal(ask("tool"), undefined, mode);
+		}
+		assert.equal(ask(1), null, "形の合わない頼みには返事をしない");
+	} finally {
+		process.env.PATH = path;
+	}
+});
+
 test("起動時に、持ち主のPiがもう居ないreadonly用の一時ディレクトリだけを掃除する", async () => {
 	const tmp = process.env.TMPDIR!;
 	const dead = spawnSync("/bin/sh", ["-c", ":"]).pid;
@@ -436,6 +500,27 @@ test("normalとaskでは.git/hooksと.git/configへのedit/writeを確認する�
 		assert.match((await late.emit("tool_call", call("write", { path })) as { reason: string })?.reason ?? "", /guard\[git-locked\]/, path);
 	}
 	assert.equal(await late.emit("tool_call", call("write", { path: "app/file.txt" })), undefined);
+});
+
+test(".git/hooksがsymlinkでも、リンク越しとリンク先のどちらへのedit/writeも確認する", async () => {
+	// 共有の hooks ディレクトリへ向けたリポジトリ。sandbox はリンク先を読み取り専用に重ねるので、bash からは書けない。
+	const root = dir("gitlock-symlink", "project");
+	execFileSync("git", ["-C", root, "init"], { stdio: "ignore" });
+	rmSync(join(root, ".git", "hooks"), { recursive: true, force: true });
+	symlinkSync(dir("gitlock-symlink", "project", "shared-hooks"), join(root, ".git", "hooks"));
+	const app = extensionHost();
+	guard(app.pi);
+	app.ctx.cwd = root;
+	await app.emit("session_start");
+	app.approve(false);
+	for (const path of [".git/hooks/pre-commit", "shared-hooks/pre-commit"]) {
+		for (const toolName of ["write", "edit"]) {
+			const result = (await app.emit("tool_call", call(toolName, { path }))) as { block: boolean; reason: string } | undefined;
+			assert.equal(result?.block, true, `${toolName} ${path}`);
+			assert.match(result!.reason, /guard\[git-locked\]/);
+		}
+	}
+	assert.equal(await app.emit("tool_call", call("write", { path: "shared-hooks.txt" })), undefined);
 });
 
 test("環境変数もセッションの記録も無いプロセスはnormalで始まり、壊れたPI_GUARDでfullにはならない", async () => {

@@ -35,7 +35,7 @@ job が終わると、`monitor-event` という custom message を 1 度だけ�
 | `request-done` | 相手が依頼を終えたと言っている | こちらでは結果を確かめていない |
 
 この拡張が自分で出すのは `process-ended` (bash の job) だけ。bash は終了の知らせだけを出し、途中の出力は知らせない。
-ほかの 3 つは、下の入口に流す拡張がいて初めて届く。いまは流す拡張が無い (agmsg の受信、検証の結果、依頼の完了はどれも未接続)。
+ほかの 3 つは、下の入口に流す拡張がいて初めて届く。`verified` は verify 拡張 (`extensions/verify/`) が、タスクの終わりに検証が成功で決まったときに流す (`wake: false` なので、ターンは起こさず次のターンに添える)。`received` と `request-done` を流す拡張はまだ無い (agmsg の受信と依頼の完了は未接続)。
 
 ### ほかの拡張からの入口
 
@@ -54,6 +54,11 @@ job が終わると、`monitor-event` という custom message を 1 度だけ�
 形の合わないものは届けず、warning を出す。
 同じ `kind`・`source`・`id` の知らせは 1 度しか届けない (直近 256 件を覚える)。通知元が同じ未読を繰り返し流しても、ターンは 1 度しか起きない。
 guard の `session_start` より前に流された知らせは捨てず、`session_start` の後で届ける。
+
+### ほかの拡張が job の一覧を訊く口
+
+`pi.events.emit("monitor:jobs", { reply })` で訊くと、`reply` にこのセッションの job の一覧 (`jobs list` と同じ中身の配列) が渡る。返事は `emit` から戻る前に来る。
+checkpoint 拡張が、ファイルを基準へ戻す前に走っている job が無いかを確かめるのに使う。渡すのは一覧の写しだけで、job を止める口は出していない (止めるのは人の `/jobs stop` かモデルの `jobs`)。
 
 ### 自分自身を起こし続けないために
 

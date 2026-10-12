@@ -72,9 +72,10 @@ const alive = (pid: number) => {
 
 /** pid を書いてから居座るコマンドと、その pid。 */
 async function sleeper(start: (command: string) => Promise<JobSummary>, cwd: string) {
-	// 出力が先。pid を先に書くと、pid を見つけた時点でまだ出力を受け取っていないことがある。
 	const job = await start("echo started; echo $$ > pid; sleep 30");
 	await until(() => existsSync(join(cwd, "pid")) && readFileSync(join(cwd, "pid"), "utf8").endsWith("\n"), "the job to write its pid");
+	// 出力はパイプ越しに届くので、pid のファイルより遅れることがある (負荷が高いと、出力を先に書かせても逆転する)。ログに出るまで待つ。
+	await until(() => readFileSync(job.logPath, "utf8").includes("started"), "the job's output to reach its log");
 	return { job, pid: Number(readFileSync(join(cwd, "pid"), "utf8")) };
 }
 

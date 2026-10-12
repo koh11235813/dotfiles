@@ -446,14 +446,16 @@ test("bashツールは実際のsandboxの中で走り、モードごとに書け
 	assert.equal(readFileSync(join(outside, "victim.txt"), "utf8"), "keep\n");
 	assert.equal(existsSync(join(root, "inside.txt")), true);
 	// 時間切れで Pi はプロセスグループを殺す。sandbox の中の子まで残らず消える。
+	// pgrep はホスト全体を数える。秒数を固定すると、同じテストを並べて走らせている別のプロセスの sleep まで拾う。
+	const nap = `sleep 61.${process.pid}`;
 	const alive = () => {
 		try {
-			return execFileSync("pgrep", ["-fx", "sleep 61.5"], { encoding: "utf8" });
+			return execFileSync("pgrep", ["-fx", nap], { encoding: "utf8" });
 		} catch {
 			return "";
 		}
 	};
-	const pending = bash.execute("call-1", { command: "sleep 61.5 & sleep 61.5", timeout: 2 }, undefined, undefined, app.ctx).then((result: { content: Array<{ text: string }> }) => result.content[0].text, String);
+	const pending = bash.execute("call-1", { command: `${nap} & ${nap}`, timeout: 2 }, undefined, undefined, app.ctx).then((result: { content: Array<{ text: string }> }) => result.content[0].text, String);
 	await new Promise((done) => setTimeout(done, 1000));
 	assert.equal(alive().trim().split("\n").length, 2);
 	assert.match(await pending, /timed out/i);
@@ -479,6 +481,39 @@ test("bashツールは実際のsandboxの中で走り、モードごとに書け
 
 	await app.command("permissions", "full");
 	assert.equal((await run(`echo out > ${outside}/full.txt`)).ok, true);
+});
+
+test("ほかの拡張が自分で起こすコマンドも、guardに準備を頼めばbashツールと同じsandboxの中で走る", { skip: cannotRun }, async () => {
+	const root = dir("channel", "project");
+	const outside = dir("channel", "outside");
+	const app = extensionHost();
+	guard(app.pi);
+	app.ctx.cwd = root;
+	await app.emit("session_start");
+	// 頼む側 (verify など) がすること。返事は emit の中で来て、返ってきた形をそのまま起こす。
+	const run = (command: string): { ok: boolean; text: string } => {
+		let answer: { command: string; cwd: string; env: NodeJS.ProcessEnv } | { error: string } | undefined;
+		app.pi.events.emit("guard:bash", { command, cwd: root, env: process.env, reply: (given: typeof answer) => (answer = given) });
+		assert.ok(answer, "返事は emit から戻る前に来る");
+		if ("error" in answer) return { ok: false, text: answer.error };
+		const result = spawnSync("/bin/bash", ["-c", answer.command], { cwd: answer.cwd, env: answer.env, encoding: "utf8" });
+		return { ok: result.status === 0, text: result.stdout + result.stderr };
+	};
+	assert.equal(run("echo in > inside.txt && cat inside.txt").text, "in\n");
+	assert.equal(run(`echo out > ${outside}/normal.txt`).ok, false);
+	assert.equal(existsSync(join(outside, "normal.txt")), false);
+
+	await app.command("permissions", "readonly");
+	assert.equal(run("echo ro > readonly.txt").ok, false);
+	assert.equal(existsSync(join(root, "readonly.txt")), false);
+	assert.equal(run('echo tmp > "$TMPDIR/scratch.txt"').ok, true);
+	await app.emit("session_shutdown");
+
+	await app.command("permissions", "full");
+	assert.equal(run(`echo out > ${outside}/full.txt`).ok, true);
+	// 固定の forbid はどのモードでも効く。頼んだ側には、準備の代わりに理由が返る。
+	assert.match(run(`git push --force origin main; echo ran > ${outside}/forbidden.txt`).text, /^guard\[git-force-push\]/);
+	assert.equal(existsSync(join(outside, "forbidden.txt")), false);
 });
 
 test("sandboxの中からは.git/hooksと.git/configを書けず、commitなどの普段の操作は通る", { skip: cannotRun }, async () => {

@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 /** タスク開始時の作業ツリー。tree は git の tree object で、commit でも stash でもない。 */
 type Baseline = { version: 1; top: string; tree: string };
 type Change = { status: string; path: string };
+/** 実体の決まった git (下の run に binary を渡したもの)。 */
+type Git = (cwd: string, args: string[], env?: NodeJS.ProcessEnv, tolerated?: number, input?: string | Buffer) => Promise<Buffer>;
 
 function isBaseline(data: unknown): data is Baseline {
 	if (!data || typeof data !== "object") return false;
@@ -19,14 +21,22 @@ function isBaseline(data: unknown): data is Baseline {
 
 /**
  * hook と fsmonitor を切るのは、リポジトリの設定がモデルの書ける場所にあり、ここは sandbox の外で走るため。
+ * hook は 2 通りある。hooks ディレクトリのものは core.hooksPath で、設定に書いたもの (hook.<名前>.event / command) は event ごとの
+ * hook.<event>.enabled で止める。event は、ここの git が出す 2 つ: index を書く add / update-index / write-tree の post-index-change と、
+ * restore の post-checkout。filter のように設定から名前を読んで 1 つずつ止めないのは、読んでから git が走るまでの間に、
+ * sandbox の中の job が新しい名前を足せるため。
+ * remote へも行かせない。設定に promisor remote を足して object を 1 つ消すと、git は欠けた object を取りに行き、
+ * remote の設定 (`ext::` の url、core.sshCommand) がコマンドを起こす。GIT_NO_LAZY_FETCH は取りに行くこと自体を止め (知らない古い git もある)、
+ * 空の GIT_ALLOW_PROTOCOL はどの transport も許さない (設定の protocol.*.allow より強い)。ここの git は remote を使わない。
+ * `-c protocol.allow=never` にしないのは、設定の protocol.ext.allow=always がそれに勝つため。
  * パスは git の出力か人の入力なので、pathspec の記号として解釈させない。
  */
-function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}, tolerated?: number, input: string | Buffer = ""): Promise<Buffer> {
+function run(binary: string, cwd: string, args: string[], env: NodeJS.ProcessEnv = {}, tolerated?: number, input: string | Buffer = ""): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
 		const child = execFile(
-			"git",
-			["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "--literal-pathspecs", ...args],
-			{ cwd, env: { ...process.env, ...env }, encoding: "buffer", maxBuffer: 256 * 1024 * 1024 },
+			binary,
+			["-c", "core.hooksPath=/dev/null", "-c", "hook.post-index-change.enabled=false", "-c", "hook.post-checkout.enabled=false", "-c", "core.fsmonitor=false", "--literal-pathspecs", ...args],
+			{ cwd, env: { ...process.env, ...env, GIT_NO_LAZY_FETCH: "1", GIT_ALLOW_PROTOCOL: "" }, encoding: "buffer", maxBuffer: 256 * 1024 * 1024 },
 			(error, stdout) => (error && error.code !== tolerated ? reject(error) : resolve(stdout)),
 		);
 		// 起動に失敗したときの EPIPE は、上の callback が同じ失敗を伝えるので捨てる。
@@ -41,7 +51,7 @@ function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}, tolerated
  * 利用者の設定 (~/.gitconfig など) の filter は止めない。モデルの書ける場所ではなく、止めると LFS が pointer のまま扱われる。
  * `-c` で渡さないのは、filter の名前に "=" が入ると鍵と値の切れ目がずれるため。
  */
-async function repoFilters(top: string): Promise<{ env: NodeJS.ProcessEnv; names: Set<string> }> {
+async function repoFilters(git: Git, top: string): Promise<{ env: NodeJS.ProcessEnv; names: Set<string> }> {
 	// 並びは "<scope>" NUL "<鍵>" NUL の繰り返し。1 つも無いと git は 1 で終わる。
 	const pattern = "^filter\\..*\\.(clean|smudge|process|required)$";
 	const fields = (await git(top, ["config", "--show-scope", "--name-only", "-z", "--get-regexp", pattern], {}, 1)).toString().split("\0");
@@ -65,13 +75,13 @@ async function repoFilters(top: string): Promise<{ env: NodeJS.ProcessEnv; names
  * `git stash create` を使わないのは、未追跡ファイルを拾わず、変更が無いと何も返さないため。
  * 一時 index を使うのは、利用者の index (staging) を動かさないため。
  */
-async function snapshot(cwd: string): Promise<{ top: string; tree: string } | undefined> {
+async function snapshot(git: Git, cwd: string): Promise<{ top: string; tree: string } | undefined> {
 	// 作業ツリーの外では git は 128 で終わり、何も出さない。それ以外の失敗 (git を起動できないなど) は「外」に数えず、呼び出し元に伝える。
 	const [top, gitDir] = (await git(cwd, ["rev-parse", "--show-toplevel", "--absolute-git-dir"], {}, 128)).toString().trimEnd().split("\n");
 	if (!gitDir) return undefined;
 	const dir = mkdtempSync(join(tmpdir(), "pi-checkpoint-"));
 	try {
-		const env = { ...(await repoFilters(top)).env, GIT_INDEX_FILE: join(dir, "index") };
+		const env = { ...(await repoFilters(git, top)).env, GIT_INDEX_FILE: join(dir, "index") };
 		// 空の index から始めると全ファイルを読み直す。commit が無いリポジトリには index が無い。
 		try { copyFileSync(join(gitDir, "index"), env.GIT_INDEX_FILE); } catch {}
 		// skip-worktree (S) / assume-unchanged (小文字) の印が付いたファイルを git add は見ない。
@@ -91,7 +101,7 @@ async function snapshot(cwd: string): Promise<{ top: string; tree: string } | un
 	}
 }
 
-async function changes(top: string, from: string, to: string): Promise<Change[]> {
+async function changes(git: Git, top: string, from: string, to: string): Promise<Change[]> {
 	// 並びは ":<旧 mode> <新 mode> <旧 id> <新 id> <状態>" NUL "<パス>" NUL の繰り返し。
 	const fields = (await git(top, ["diff-tree", "-r", "-z", "--raw", from, to])).toString().split("\0");
 	const list: Change[] = [];
@@ -116,7 +126,7 @@ function fingerprint(path: string): string | null {
 }
 
 /** 基準の tree に入っている path の指紋。fingerprint と同じ形で返す。 */
-async function baselineFingerprint(baseline: Baseline, path: string): Promise<string | null> {
+async function baselineFingerprint(git: Git, baseline: Baseline, path: string): Promise<string | null> {
 	// 並びは "<mode> <種類> <id>" TAB "<パス>" NUL。
 	const entry = (await git(baseline.top, ["ls-tree", "-z", baseline.tree, "--", path])).toString();
 	if (!entry) return null;
@@ -165,6 +175,10 @@ function obstacle(top: string, path: string): string | undefined {
 	}
 }
 
+/** guard の monitor に job の一覧を訊く口 (guard/monitor/index.ts の JOBS_CHANNEL)。 */
+const MONITOR_JOBS = "monitor:jobs";
+/** guard に、sandbox の外で起こす道具の実体を訊く口 (guard/index.ts の BINARY_CHANNEL)。 */
+const GUARD_BINARY = "guard:binary";
 const DIFF_LINES = 200;
 /** 確認なしで戻してよい唯一の状態。 */
 const OWN = "Pi が書いたまま";
@@ -177,6 +191,20 @@ export default function (pi: ExtensionAPI) {
 	/** Pi が書く直前に、基準とも Pi の前回の書き込みとも違っていたファイル。Pi の上書きで見えなくなる変更を覚えておく。 */
 	const mixed = new Set<string>();
 
+	/**
+	 * guard が居れば、git の実体を guard に訊いてから起こす。名前だけで起こすと PATH を探し、PATH の要素が sandbox の中から
+	 * 書ける場所にあると (root の中の `.venv/bin`、mise の shims)、モデルの置いた git がここ (sandbox の外) で走る。
+	 * 返事が無ければ guard は居ない。sandbox も無いので、名前のまま起こす。
+	 * 「無い」という返事なら起こさない。名前で起こし直すと、guard が飛ばした候補を拾う。
+	 * 覚えずに毎回訊く。PATH も書ける場所もセッションの途中で変わりうる。
+	 */
+	const git: Git = async (cwd, ...rest) => {
+		let binary: string | undefined = "git";
+		pi.events.emit(GUARD_BINARY, { name: "git", reply: (found?: string) => (binary = found) });
+		if (!binary) throw new Error("sandbox の中から書けない場所の PATH に git が無い");
+		return run(binary, cwd, ...rest);
+	};
+
 	function origin(path: string) {
 		if (!written.has(path)) return "Pi の write / edit 以外の変更";
 		return !mixed.has(path) && written.get(path) === fingerprint(join(baseline!.top, path)) ? OWN : "Pi と別の変更が混じっている";
@@ -187,7 +215,7 @@ export default function (pi: ExtensionAPI) {
 		const path = repoPath(String(event.input.path), ctx.cwd, baseline.top);
 		if (!path) return;
 		try {
-			const known = written.has(path) ? written.get(path) : await baselineFingerprint(baseline, path);
+			const known = written.has(path) ? written.get(path) : await baselineFingerprint(git, baseline, path);
 			if (fingerprint(join(baseline.top, path)) !== known) mixed.add(path);
 		} catch {
 			// tool_call の handler が投げると Pi はそのツール呼び出しを止める。分からないときは確認に回す側へ倒す。
@@ -201,6 +229,27 @@ export default function (pi: ExtensionAPI) {
 		if (path) written.set(path, fingerprint(join(baseline.top, path)));
 	});
 
+	/**
+	 * guard の monitor が走らせている job の id。guard が読み込まれていなければ空 (job を起こす道具も無い)。
+	 * 返事は emit の中で来る。Pi のイベントバスは聞き手を emit の中で同期に呼ぶ (dist/core/event-bus.js)。
+	 * ここから job を止めないのは、どの job が戻すファイルを書くのかを見分けられず、関係の無い長いビルドまで止めるため。
+	 * 止めるか待つかは人が決める。
+	 */
+	function runningJobs(): string[] {
+		let jobs: Array<{ id: string; state: string }> = [];
+		pi.events.emit(MONITOR_JOBS, { reply: (given: typeof jobs) => (jobs = given) });
+		return jobs.filter((job) => job.state === "running").map((job) => job.id);
+	}
+
+	/** いま戻すと、動いている Pi か走っている job が、戻した後で書き換えうる。その断り文。戻してよければ無し。 */
+	function stillWriting(ctx: ExtensionContext): string | undefined {
+		if (!ctx.isIdle()) return "checkpoint: Pi が動いている間は戻さない。止まってからやり直す。";
+		const busy = runningJobs();
+		if (busy.length === 0) return undefined;
+		// /jobs stop は、シグナルの届かない job (sudo で root になったものなど) を止められず、running のまま残す (monitor の README)。
+		return `checkpoint: monitor の job が走っている間は戻さない (${busy.join(", ")})。書いている最中に戻すと、戻した後でまた書き換えられる。/jobs stop <id> で止めるか、終わるのを待ってからやり直す。止めても running のまま残る job は、そのプロセスを自分で終わらせるか、Pi を起動し直す。`;
+	}
+
 	function forget() {
 		baseline = undefined;
 		written.clear();
@@ -210,7 +259,7 @@ export default function (pi: ExtensionAPI) {
 	/** 取れたら true。取れなかったら、前の基準と Pi の記録には触らない。 */
 	async function take(ctx: ExtensionContext) {
 		try {
-			const taken = await snapshot(ctx.cwd);
+			const taken = await snapshot(git, ctx.cwd);
 			if (!taken) {
 				if (baseline) ctx.ui.notify("checkpoint: git の作業ツリーの外なので基準を取れなかった。前の基準をそのまま使う。", "warning");
 				return false;
@@ -260,9 +309,9 @@ export default function (pi: ExtensionAPI) {
 				if (taken) ctx.ui.notify(`checkpoint: 今の作業ツリーを新しい基準にした (${baseline.tree.slice(0, 12)})。`, "info");
 				return;
 			}
-			const now = await snapshot(baseline.top);
+			const now = await snapshot(git, baseline.top);
 			if (!now) throw new Error(`checkpoint: ${baseline.top} is no longer a git work tree`);
-			const list = await changes(baseline.top, baseline.tree, now.tree);
+			const list = await changes(git, baseline.top, baseline.tree, now.tree);
 			if (list.length === 0) {
 				ctx.ui.notify("checkpoint: 基準から変わったファイルは無い。", "info");
 				return;
@@ -286,8 +335,9 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(`checkpoint: 「${path}」は復元候補に無い。/checkpoint の一覧にあるパスをそのまま渡す。`, "warning");
 					return;
 				}
-				if (!ctx.isIdle()) {
-					ctx.ui.notify("checkpoint: Pi が動いている間は戻さない。止まってからやり直す。", "warning");
+				const busy = stillWriting(ctx);
+				if (busy) {
+					ctx.ui.notify(busy, "warning");
 					return;
 				}
 				const blocker = obstacle(baseline.top, path);
@@ -298,10 +348,15 @@ export default function (pi: ExtensionAPI) {
 				if (change.status !== "A") {
 					// 並びは "<パス>" NUL "filter" NUL "<値>" NUL。
 					const filter = (await git(baseline.top, ["check-attr", "-z", "filter", "--", path])).toString().split("\0")[2];
-					if ((await repoFilters(baseline.top)).names.has(filter)) {
+					if ((await repoFilters(git, baseline.top)).names.has(filter)) {
 						ctx.ui.notify(`checkpoint: ${path} にはリポジトリの設定にある filter「${filter}」が掛かる。その filter を通さずに取った基準は作業ツリーの形と合わないことがあるので戻さない。`, "warning");
 						return;
 					}
+				}
+				// 基準の中身が欠けている (object を消された、gc された) まま git restore を打つと、git は作業ツリーのファイルを消してから失敗する。
+				if (change.status !== "A" && !(await baselineFingerprint(git, baseline, path).catch(() => undefined))) {
+					ctx.ui.notify(`checkpoint: ${path} の基準の中身を git から読めないので戻さない。`, "warning");
+					return;
 				}
 				const seen = fingerprint(join(baseline.top, path));
 				const from = origin(path);
@@ -321,7 +376,14 @@ export default function (pi: ExtensionAPI) {
 					}
 				}
 				// 確認を待つ間にも中身は変わりうるので、控えは書き換える直前に取る。
-				const before = await snapshot(baseline.top);
+				const before = await snapshot(git, baseline.top);
+				// 中身が同じでも、最初の確かめだけでは足りない。確認と上の git を待つ間に、job の知らせがターンを起こし
+				// (monitor は Pi が idle のときに起こす)、そのターンが、まだ何も書いていない job を起こしていることがある。
+				const late = stillWriting(ctx);
+				if (late) {
+					ctx.ui.notify(late, "warning");
+					return;
+				}
 				if (fingerprint(join(baseline.top, path)) !== seen || obstacle(baseline.top, path)) {
 					ctx.ui.notify(`checkpoint: ${path} は確認の間に中身が変わったので戻さなかった。/checkpoint からやり直す。`, "warning");
 					return;

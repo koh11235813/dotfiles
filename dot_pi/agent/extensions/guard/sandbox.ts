@@ -258,7 +258,12 @@ export function gitLocks(root: string, git: string | undefined): Lock[] {
 			if (lstatSync(file).isFile()) locks.push({ path: file, directory: false });
 		} catch {}
 	}
-	return locks;
+	// symlink のもの (共有の hooks へ向けた `.git/hooks` など) は、リンク先も数える。名前だけだと、解決後のパスで照合する側
+	// (edit / write の判定の inside、seatbelt) でリンク先の中が一致せず、確認なしで書ける。
+	return locks.flatMap((lock) => {
+		const target = real(lock.path);
+		return target && target !== lock.path ? [lock, { ...lock, path: target }] : [lock];
+	});
 }
 
 /** root から何段下のディレクトリまで `.git` を探すか。0 は root 直下の `.git` だけ。 */
