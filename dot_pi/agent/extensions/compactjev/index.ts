@@ -24,6 +24,16 @@
  * - `!` bash executions: Pi passes these to the summarizer whole, so any filter only loses text.
  * - Results of `read`, `grep`, `find` and `ls`: see READER_TOOLS.
  * - A result with a failed or incomplete Jev request: see scoreBatch.
+ * - 空行を除いて 1 行しかない結果: selectTargets を参照。
+ *
+ * 失敗したツール結果 (isError) だけは上の 2 つの例外にしない。末尾を Jev に訊かずに残し (pinTail)、
+ * 採点が欠けても頭と末尾に絞る。Pi に任せると頭の 2000 字だけが残り、失敗の中身が落ちる。
+ *
+ * 絞るたびに、何を落としたかを custom entry "compactjev" としてセッションに残す (README.md)。
+ *
+ * ここまでが既定の lines モード。`/compactjev calls` を選んだセッションでは、先に calls.ts の
+ * 方式 (呼び出し単位で採点し、要約を作らずに原文を返す) を試し、返せなかったときだけ上へ落ちる。
+ * session_recall (recall.ts) はどちらのモードでも登録する。
  *
  * Providers are tried in order until one has usable credentials:
  *   typesafe/jev-latest, openrouter/~typesafe/jev-latest,
@@ -33,6 +43,8 @@
 
 import type { ClassifierApi, ClassifierModel, ClassifierQuestion } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import { compactCalls, ERROR_TAIL_CHARS } from "./calls.ts";
+import { registerRecall } from "./recall.ts";
 
 type AgentMessage = SessionBeforeCompactEvent["preparation"]["messagesToSummarize"][number];
 
@@ -67,12 +79,17 @@ const CONCURRENCY = 4;
 /** Cost cap: non-blank lines scored per compaction. */
 const MAX_SCORED_LINES = 3000;
 
+/** Jev の要求が失敗した圧縮がこの回数続いたら警告する。1 回きりの失敗は通知の末尾で足りる。 */
+const FAIL_STREAK_WARN = 2;
+
 /** One text block of a tool output, split into lines. */
 interface LogBlock {
 	lines: string[];
 	/** Keep-probability per line, once Jev has scored it. */
 	probabilities: number[];
 	kept: boolean[];
+	/** 失敗した出力の末尾の行。Jev に訊かず、採点に関わらず残す。 */
+	pinned: boolean[];
 }
 
 /** A long tool result selected for filtering. */
@@ -80,6 +97,8 @@ interface LogTarget {
 	command: string;
 	/** Text blocks by content index. */
 	blocks: Map<number, LogBlock>;
+	/** Pi が失敗と記録したツール結果。 */
+	error: boolean;
 	batches: number;
 	failed: number;
 }
@@ -116,6 +135,19 @@ export function readGoal(entries: SessionBeforeCompactEvent["branchEntries"]): s
 	return goal;
 }
 
+type Mode = "lines" | "calls";
+
+/** `/compactjev` で最後に選んだ方式。選んでいなければ lines。 */
+export function readMode(entries: SessionBeforeCompactEvent["branchEntries"]): Mode {
+	let mode: Mode = "lines";
+	for (const entry of entries) {
+		if (entry.type !== "custom" || entry.customType !== "compactjev-mode") continue;
+		const data = entry.data as { version?: unknown; mode?: unknown } | undefined;
+		if (data?.version === 1 && (data.mode === "lines" || data.mode === "calls")) mode = data.mode;
+	}
+	return mode;
+}
+
 function lastUserText(messages: AgentMessage[]): string {
 	const user = messages.filter((m) => m.role === "user").at(-1);
 	return user?.role === "user" ? textOf(user.content) : "";
@@ -139,7 +171,7 @@ function renderToolCalls(messages: AgentMessage[]): Map<string, string> {
 
 function toBlock(text: string): LogBlock {
 	const lines = text.split("\n");
-	return { lines, probabilities: lines.map(() => 1), kept: lines.map(() => false) };
+	return { lines, probabilities: lines.map(() => 1), kept: lines.map(() => false), pinned: lines.map(() => false) };
 }
 
 /** Pick the long tool outputs to filter, keyed by their (live, never mutated) message object. */
@@ -154,10 +186,42 @@ function selectTargets(messages: AgentMessage[]): Map<AgentMessage, LogTarget> {
 			m.content.forEach((c, i) => {
 				if (c.type === "text") blocks.set(i, toBlock(c.text));
 			});
-			targets.set(m, { command: commands.get(m.toolCallId) ?? m.toolName, blocks, batches: 0, failed: 0 });
+			const target: LogTarget = { command: commands.get(m.toolCallId) ?? m.toolName, blocks, error: m.isError === true, batches: 0, failed: 0 };
+			if (target.error) pinTail(target);
+			// 1 行だけなら順位を付ける相手が無い。こちらで切ると印の分だけ Pi の頭 2000 字より短くなるので対象にしない。
+			// 失敗した出力は 1 行でも外さない。Pi に任せると頭の 2000 字だけが残り、末尾の終了状態が落ちる。
+			if (target.error || nonBlankLines(target).length > 1) targets.set(m, target);
 		}
 	}
 	return targets;
+}
+
+/** 失敗した出力の末尾から、ERROR_TAIL_CHARS に収まる行を採点の対象から外して残す。 */
+function pinTail(target: LogTarget): void {
+	const lines = nonBlankLines(target);
+	let room = ERROR_TAIL_CHARS;
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const { block, index } = lines[i];
+		const line = block.lines[index];
+		if (line.length + 1 > room) {
+			// 最後の行だけで枠を超える出力は、その行の終わりを残す。頭を残すと失敗の中身が落ちる。
+			if (i !== lines.length - 1) break;
+			const keep = room - 1 - `[… ${line.length} chars dropped by compactjev] `.length;
+			// ほかに行が無ければ、採点で選ぶ分の予算が丸ごと余る。頭を捨てると Pi 単体の頭 2000 字より 1400 字多く失う。
+			const head = lines.length === 1 ? line.slice(0, KEEP_CHARS - ERROR_TAIL_CHARS) : "";
+			// 頭と終わりで行が尽きるなら、落とすものが無い。切ると同じ字を両方に載せ、落とした字数が負の印になる。
+			if (head.length + keep < line.length) block.lines[index] = `${head && `${head} `}[… ${line.length - head.length - keep} chars dropped by compactjev] ${line.slice(-keep)}`;
+			block.pinned[index] = true;
+			break;
+		}
+		room -= line.length + 1;
+		block.pinned[index] = true;
+	}
+}
+
+/** 空行と、採点せずに残す行を除いた行。 */
+function rankedLines(target: LogTarget): LogBatch["lines"] {
+	return nonBlankLines(target).filter(({ block, index }) => !block.pinned[index]);
 }
 
 function nonBlankLines(target: LogTarget): LogBatch["lines"] {
@@ -175,7 +239,9 @@ function planBatches(targets: Iterable<LogTarget>): LogBatch[] {
 	const batches: LogBatch[] = [];
 	let scored = 0;
 	for (const target of targets) {
-		const lines = nonBlankLines(target);
+		const lines = rankedLines(target);
+		// 失敗した出力で、残す末尾のほかに 1 行しか無いもの。順位を付ける相手が無い。
+		if (lines.length < 2) continue;
 		if (scored + lines.length > MAX_SCORED_LINES) continue;
 		scored += lines.length;
 		for (let i = 0; i < lines.length; i += BATCH_LINES) {
@@ -224,8 +290,13 @@ async function scoreBatch(
 
 /** Keep the highest-ranked lines within KEEP_CHARS, then trim until the collapsed text fits MIN_LOG_CHARS. */
 function selectLines(target: LogTarget): void {
-	const ranked = nonBlankLines(target).sort((a, b) => b.block.probabilities[b.index] - a.block.probabilities[a.index]);
+	const ranked = rankedLines(target).sort((a, b) => b.block.probabilities[b.index] - a.block.probabilities[a.index]);
 	let budget = KEEP_CHARS;
+	for (const { block, index } of nonBlankLines(target)) {
+		if (!block.pinned[index]) continue;
+		block.kept[index] = true;
+		budget -= block.lines[index].length + 1;
+	}
 	for (const { block, index } of ranked) {
 		const line = block.lines[index];
 		block.kept[index] = true;
@@ -312,6 +383,40 @@ function percent(before: number, after: number): string {
 	return before ? `-${Math.round(((before - after) / before) * 100)}%` : "-0%";
 }
 
+/** 絞った 1 つのツール出力について、何を落としたかの記録。原文はセッションの toolCallId の結果にある。 */
+interface OutputRecord {
+	toolCallId: string;
+	command: string;
+	before: number;
+	after: string;
+	blankLines: number;
+	batches: number;
+	/** 失敗した Jev 要求の数。0 でなければ失敗した出力で、採点を使わず元の順に頭と末尾を残している。 */
+	failed: number;
+	/** 空行を除いた各行。落とした行だけ、Jev に見せた範囲の本文を持つ。`pinned` は Jev に訊かずに残した行。 */
+	lines: Array<{ chars: number; probability: number; kept: boolean; pinned?: true; text?: string }>;
+}
+
+function recordOutput(m: AgentMessage, filtered: AgentMessage, target: LogTarget): OutputRecord | undefined {
+	if (m.role !== "toolResult" || filtered.role !== "toolResult") return undefined;
+	const lines: OutputRecord["lines"] = [];
+	let blankLines = 0;
+	for (const [i, block] of target.blocks) {
+		const content = m.content[i];
+		// selectLines は切り詰めた行で block.lines を書き換えるので、長さと本文は原文から取る。
+		const original = content.type === "text" ? content.text.split("\n") : [];
+		original.forEach((line, index) => {
+			if (!line.trim()) {
+				blankLines++;
+				return;
+			}
+			const kept = block.kept[index];
+			lines.push({ chars: line.length, probability: block.probabilities[index], kept, ...(block.pinned[index] ? { pinned: true as const } : {}), ...(kept ? {} : { text: line.slice(0, LINE_MAX_CHARS) }) });
+		});
+	}
+	return { toolCallId: m.toolCallId, command: target.command, before: textLength(m), after: textOf(filtered.content), blankLines, batches: target.batches, failed: target.failed, lines };
+}
+
 /** A total line (ending in `suffix`) followed by one line per tool output, largest reduction first. */
 function formatStats(stats: TargetStats[], suffix: string): string {
 	const sum = (key: "lines" | "dropped" | "before" | "after"): number => stats.reduce((n, s) => n + s[key], 0);
@@ -325,6 +430,25 @@ function formatStats(stats: TargetStats[], suffix: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	// 失敗が続いた圧縮の回数。セッションをまたいで持ち越さない (拡張は new / resume / reload で作り直される)。
+	let failStreak = 0;
+	let streakWarned = false;
+
+	registerRecall(pi);
+
+	pi.registerCommand("compactjev", {
+		description: "Show or set how compactjev compacts: lines (filter log lines, Pi summarizes) or calls (keep or drop whole tool calls, no LLM summary)",
+		handler: async (args, ctx) => {
+			const mode = args.trim();
+			if (mode === "lines" || mode === "calls") pi.appendEntry("compactjev-mode", { version: 1, mode });
+			else if (mode) {
+				ctx.ui.notify("Usage: /compactjev [lines|calls]", "warning");
+				return;
+			}
+			ctx.ui.notify(`compactjev mode: ${readMode(ctx.sessionManager.getBranch())}`, "info");
+		},
+	});
+
 	pi.on("session_before_compact", async (event, ctx) => {
 		const jev = findJev(ctx);
 		if (!jev) return undefined;
@@ -334,9 +458,21 @@ export default function (pi: ExtensionAPI) {
 			const all = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
 			const stated = [readGoal(event.branchEntries), event.customInstructions?.trim()].filter(Boolean).join("\n");
 			const goal = (stated || lastUserText(all)).slice(0, GOAL_MAX_CHARS);
+
+			if (readMode(event.branchEntries) === "calls") {
+				const outcome = await compactCalls(event, ctx, jev, goal);
+				if (signal.aborted) return undefined;
+				if ("compaction" in outcome) {
+					ctx.ui.notify(`compactjev: kept the conversation verbatim without an LLM summary, ${outcome.compaction.summary.length} chars, cut ${outcome.dropped}/${outcome.calls} scored tool calls`, "info");
+					return { compaction: outcome.compaction };
+				}
+				// 落ちるたびに知らせる。lines に落ちた後は Jev が通れば連続失敗の警告が出ないので、ここで黙ると calls が効いていないことに気づけない。
+				ctx.ui.notify(`compactjev: calls mode not used (${outcome.declined}); filtering log lines for Pi's summary instead`, outcome.failed ? "warning" : "info");
+			}
 			const targets = selectTargets(all);
 			const batches = planBatches(targets.values());
-			if (batches.length === 0) return undefined;
+			const errorTargets = [...targets.values()].filter((target) => target.error);
+			if (batches.length === 0 && errorTargets.length === 0) return undefined;
 
 			let next = 0;
 			// Promise.all rejects on the first throw but cannot cancel the other workers.
@@ -361,18 +497,37 @@ export default function (pi: ExtensionAPI) {
 			await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 			if (signal.aborted) return undefined;
 
-			if (failed === batches.length) {
-				ctx.ui.notify(`compactjev: all ${batches.length} Jev requests failed (${firstError}) — compacting without log filter`, "warning");
-				return undefined;
+			if (failed) failStreak++;
+			// Jev に訊かなかった圧縮 (失敗した 1 行の出力だけ) は、失敗の無い圧縮に数えない。
+			else if (batches.length) {
+				failStreak = 0;
+				streakWarned = false;
 			}
-			const scoredTargets = new Set(batches.map((b) => b.target).filter((t) => t.failed === 0));
+			const allFailed = batches.length > 0 && failed === batches.length;
+			if (allFailed) {
+				const rest = errorTargets.length ? "keeping only the head and tail of failed tool outputs" : "compacting without log filter";
+				ctx.ui.notify(`compactjev: all ${batches.length} Jev requests failed (${firstError}) — ${rest}`, "warning");
+				if (errorTargets.length === 0) return undefined;
+			}
+			// 失敗した出力は採点が欠けても絞る。欠けた採点は捨てて全行を同じ順位に戻すと、元の順のまま頭と末尾が残る。
+			for (const target of errorTargets) {
+				if (target.failed === 0 && target.batches > 0) continue;
+				for (const block of target.blocks.values()) block.probabilities.fill(1);
+			}
+			const scoredTargets = new Set([...targets.values()].filter((t) => t.error || (t.failed === 0 && t.batches > 0)));
 			for (const target of scoredTargets) selectLines(target);
 
 			const stats: TargetStats[] = [];
+			const outputs: OutputRecord[] = [];
+			const unfiltered: Array<{ toolCallId: string; command: string; chars: number; batches: number; failed: number }> = [];
 			const filter = (messages: AgentMessage[]): AgentMessage[] =>
 				messages.map((m) => {
 					const target = targets.get(m);
-					if (!target || !scoredTargets.has(target)) return m;
+					if (!target) return m;
+					if (!scoredTargets.has(target)) {
+						if (m.role === "toolResult") unfiltered.push({ toolCallId: m.toolCallId, command: target.command, chars: textLength(m), batches: target.batches, failed: target.failed });
+						return m;
+					}
 					const rebuilt = rebuild(m, target);
 					stats.push({
 						command: target.command,
@@ -381,6 +536,8 @@ export default function (pi: ExtensionAPI) {
 						before: textLength(m),
 						after: textLength(rebuilt.message),
 					});
+					const output = recordOutput(m, rebuilt.message, target);
+					if (output) outputs.push(output);
 					return rebuilt.message;
 				});
 			const summarize = filter(preparation.messagesToSummarize);
@@ -390,10 +547,22 @@ export default function (pi: ExtensionAPI) {
 			preparation.messagesToSummarize.splice(0, preparation.messagesToSummarize.length, ...summarize);
 			preparation.turnPrefixMessages.splice(0, preparation.turnPrefixMessages.length, ...prefix);
 
+			try {
+				pi.appendEntry("compactjev", { version: 1, lineChars: LINE_MAX_CHARS, batchLines: BATCH_LINES, outputs, unfiltered });
+			} catch (error) {
+				// 外側の catch に任せると、もう絞った後なのに「絞らずに圧縮する」と知らせてしまう。
+				ctx.ui.notify(`compactjev: loss record not saved: ${error instanceof Error ? error.message : String(error)}`, "warning");
+			}
+
 			const failures = failed ? `, ${failed}/${batches.length} Jev requests failed: ${firstError}` : "";
 			const unscored = targets.size - scoredTargets.size;
 			const skipped = unscored ? `, ${unscored} tool outputs left unfiltered` : "";
 			ctx.ui.notify(formatStats(stats, `${failures}${skipped}`), "info");
+			// 全滅のときは上で毎回警告している。ここは info の末尾に埋もれる一部失敗のためのもの。
+			if (failed && !allFailed && failStreak >= FAIL_STREAK_WARN && !streakWarned) {
+				streakWarned = true;
+				ctx.ui.notify(`compactjev: Jev requests failed in ${failStreak} compactions in a row (${firstError}); the tool outputs they covered are not being filtered`, "warning");
+			}
 		} catch (error) {
 			if (!signal.aborted) {
 				const message = error instanceof Error ? error.message : String(error);
