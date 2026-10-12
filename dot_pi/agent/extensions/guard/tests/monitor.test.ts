@@ -220,6 +220,23 @@ test("セッションの終わりとtreeの移動はjobが止まるのを待ち�
 	}
 });
 
+test("treeの移動で止めている最中のjobは、止まるまでmonitor:jobsの答えに残る", async () => {
+	const { app, start } = await session();
+	const asked = () => {
+		let jobs: JobSummary[] = [];
+		app.pi.events.emit("monitor:jobs", { reply: (given: JobSummary[]) => (jobs = given) });
+		return jobs.filter((job) => job.state === "running").length;
+	};
+	// SIGTERM を無視するので、SIGKILL の猶予が過ぎるまで生きている。
+	await start("trap '' TERM; echo $$ > pid; sleep 30 & wait");
+	await until(() => existsSync(join(app.ctx.cwd, "pid")), "the job to write its pid");
+	const moved = app.emit("session_tree");
+	await pause(100);
+	assert.equal(asked(), 1);
+	await moved;
+	assert.equal(asked(), 0);
+});
+
 test("/permissionsで厳しい側へ移ると走っているjobを止め、同じか緩い側では止めない", { skip: cannotRun }, async () => {
 	const { app, start, jobs } = await session("ask");
 	// Linux の sandbox は pid namespace を分けるので、中で書いた pid は外から見えない。鼓動が進むかで生死を見る。

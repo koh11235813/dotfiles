@@ -43,7 +43,8 @@ function readStore(): Store | undefined {
 	}
 	try {
 		const store = JSON.parse(text) as Store;
-		if (store.version === 1 && store.projects && typeof store.projects === "object") return store;
+		// 配列も object だが、project の名前で足した登録は JSON にすると消える。
+		if (store.version === 1 && store.projects && typeof store.projects === "object" && !Array.isArray(store.projects)) return store;
 	} catch {}
 	return undefined;
 }

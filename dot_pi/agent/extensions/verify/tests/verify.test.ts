@@ -437,6 +437,21 @@ test("別のセッションが登録を変えたときも、前の結果を残�
 	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(確かめた後に登録が変わった/);
 });
 
+test("verify.json の projects が配列なら知らない形として扱い、登録したことにしない", async () => {
+	const store = join(process.env.PI_CODING_AGENT_DIR!, "verify.json");
+	const saved = readFileSync(store);
+	const odd = JSON.stringify({ version: 1, projects: [] });
+	writeFileSync(store, odd);
+	try {
+		const app = await session(repo());
+		await app.command("verify", "add true");
+		assert.match(app.notices.at(-1)!, /verify\.json/);
+		assert.equal(readFileSync(store, "utf8"), odd);
+	} finally {
+		writeFileSync(store, saved);
+	}
+});
+
 test("verify.json が壊れていたら登録を書き換えず、他の project の登録を消さない", async () => {
 	const store = join(process.env.PI_CODING_AGENT_DIR!, "verify.json");
 	const dir = repo();

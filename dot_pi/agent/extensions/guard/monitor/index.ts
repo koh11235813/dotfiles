@@ -138,6 +138,10 @@ function status(all: JobSummary[]): string {
 
 export function registerMonitor(pi: ExtensionAPI, prepare: BashSpawnHook) {
 	let manager: JobManager | undefined;
+	// reset で手放した manager のうち、まだ走っている job を持つもの。一覧 (jobs / /jobs) には出さないが、monitor:jobs には答える。
+	// 手放した時点で忘れると、止めている最中の job と止め切れなかった job (dispose は上限で待つのをやめる) が、
+	// 訊いた側 (checkpoint の復元) から「走っていない」に見える。
+	const retired = new Set<JobManager>();
 	// 終了の知らせは job より長生きする closure から届く。世代が違えば捨てる。
 	let generation = 0;
 	let live: ExtensionContext | undefined;
@@ -250,7 +254,9 @@ export function registerMonitor(pi: ExtensionAPI, prepare: BashSpawnHook) {
 	// 止めるかどうかを決めるのは人で、その入口は /jobs stop に既にある。
 	pi.events.on(JOBS_CHANNEL, (data) => {
 		const reply = (data as { reply?: unknown } | null)?.reply;
-		if (typeof reply === "function") reply(manager?.list() ?? []);
+		if (typeof reply !== "function") return;
+		for (const old of retired) if (!old.list().some((job) => job.state === "running")) retired.delete(old);
+		reply([...(manager?.list() ?? []), ...[...retired].flatMap((old) => old.list().filter((job) => job.state === "running"))]);
 	});
 
 	// 拡張が入れた入力 (source: "extension") は人ではないので数え直さない。
@@ -369,6 +375,7 @@ export function registerMonitor(pi: ExtensionAPI, prepare: BashSpawnHook) {
 			seen.clear();
 			const old = manager;
 			manager = undefined;
+			if (old) retired.add(old);
 			await old?.dispose();
 		},
 	};
