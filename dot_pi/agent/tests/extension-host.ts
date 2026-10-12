@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 
 /** Pi is the external boundary; session storage is the real SDK implementation. */
 export function extensionHost() {
@@ -12,6 +12,7 @@ export function extensionHost() {
 	const statuses = new Map<string, string | undefined>();
 	const confirmations: string[] = [];
 	const messages: Array<{ message: Record<string, unknown>; options?: Record<string, unknown> }> = [];
+	const settings: Record<string, unknown> = {};
 	let approved = false;
 	let idle = true;
 	let manager = SessionManager.inMemory(process.cwd());
@@ -45,9 +46,11 @@ export function extensionHost() {
 		appendEntry: (type: string, data: unknown) => manager.appendCustomEntry(type, data),
 		sendMessage: (message: Record<string, unknown>, options?: Record<string, unknown>) => { messages.push({ message, options }); },
 		getAllTools: () => tools,
+		getSettings: () => ({ ...settings }),
+		events: createEventBus(),
 	} as unknown as ExtensionAPI;
 	return {
-		pi, ctx, notices, widgets, statuses, confirmations, messages, commands, shortcuts, tools, registeredTools,
+		pi, ctx, notices, widgets, statuses, confirmations, messages, commands, shortcuts, tools, registeredTools, settings,
 		resetRuntime: () => { handlers.clear(); commands.clear(); shortcuts.clear(); },
 		get manager() { return manager; },
 		replaceSession: (next = SessionManager.inMemory(process.cwd())) => { manager = next; },

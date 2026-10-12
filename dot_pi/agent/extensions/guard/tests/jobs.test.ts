@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -333,5 +333,68 @@ test("グループを抜けた子孫がパイプを握っていても、シェ�
 		assert.doesNotThrow(() => process.kill(pid, 0));
 	} finally {
 		process.kill(pid, "SIGKILL");
+	}
+});
+
+test("後始末なしに持ち主のプロセスが死んでも、jobは残らない", async () => {
+	const pidFile = join(base, "orphan.pid");
+	const script = join(base, "owner.mjs");
+	writeFileSync(
+		script,
+		`import { createJobManager } from ${JSON.stringify(join(import.meta.dirname, "../monitor/jobs.ts"))};
+await createJobManager().start({ command: "echo $$ > ${pidFile}; sleep 30", cwd: ${JSON.stringify(base)}, env: process.env });
+setInterval(() => {}, 1000);`,
+	);
+	const owner = spawn(process.execPath, ["--no-warnings", script], { stdio: "ignore" });
+	try {
+		await until(() => existsSync(pidFile) && readFileSync(pidFile, "utf8").endsWith("\n"), "the job to start");
+		const pid = Number(readFileSync(pidFile, "utf8"));
+		// SIGKILL は捕まえられない。session_shutdown も exit のハンドラも走らない終わり方。
+		owner.kill("SIGKILL");
+		await gone(pid);
+	} finally {
+		owner.kill("SIGKILL");
+	}
+});
+
+test("引数なしのwaitは自分の起こした子だけを待ち、見張りはコマンドから見えない", async () => {
+	const { manager, start } = make();
+	const job = await start('echo "last=${!:-none}"; sleep 0.1 & sleep 0.15 & wait; echo all-done; echo "jobs=$(jobs -p | wc -l)"; (echo >&3) 2>/dev/null && echo fd3-open || echo fd3-closed');
+	await until(() => manager.list()[0].state !== "running", "the job to get past wait");
+	assert.equal(manager.list()[0].state, "succeeded");
+	// fd 3 が開いたままコマンドとその子に継がれると、それが生きている間は持ち主が死んでも見張りに EOF が来ない。
+	assert.equal(manager.log(job.id).tail.replace(/ +/g, ""), "last=none\nall-done\njobs=0\nfd3-closed\n");
+});
+
+test("stopは、グループを抜けた子孫も止める", { skip: process.platform !== "linux" || !existsSync("/usr/bin/perl") }, async () => {
+	const { manager, start } = make();
+	const pidFile = gatePath();
+	const escape = `/usr/bin/perl -MPOSIX -e 'setsid(); open(F, ">", $ENV{PIDFILE}); print F "$$\\n"; close F; sleep 30'`;
+	const job = await start(`${escape} & sleep 30`, { env: { PIDFILE: pidFile } });
+	const pid = await pidIn(pidFile);
+	try {
+		assert.equal((await manager.stop(job.id)).state, "stopped");
+		await gone(pid);
+	} finally {
+		try {
+			process.kill(pid, "SIGKILL");
+		} catch {}
+	}
+});
+
+test("stopは、グループを抜けてSIGTERMを無視する子孫も、シェルが終わった時点で止める", { skip: process.platform !== "linux" || !existsSync("/usr/bin/perl") }, async () => {
+	// シェルが終わると、猶予の後の SIGKILL のタイマーは消える。そこで送らないと、この子孫は誰にも止められない。
+	const { manager, start } = make({ killGraceMs: 200 });
+	const pidFile = gatePath();
+	const escape = `/usr/bin/perl -MPOSIX -e 'setsid(); $SIG{TERM} = "IGNORE"; open(F, ">", $ENV{PIDFILE}); print F "$$\\n"; close F; sleep 30'`;
+	const job = await start(`${escape} & sleep 30`, { env: { PIDFILE: pidFile } });
+	const pid = await pidIn(pidFile);
+	try {
+		assert.equal((await manager.stop(job.id)).state, "stopped");
+		await gone(pid);
+	} finally {
+		try {
+			process.kill(pid, "SIGKILL");
+		} catch {}
 	}
 });

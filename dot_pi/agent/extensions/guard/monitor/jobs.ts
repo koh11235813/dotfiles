@@ -7,7 +7,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,6 +47,8 @@ const TAIL_LINES = 80;
 const MAX_TIMER_MS = 2_147_483_647;
 /** シェルが終わってからパイプが閉じるのを待つ上限。グループを抜けた子孫 (setsid) がパイプを握ったままでも、ここで切る。 */
 const DRAIN_GRACE_MS = 250;
+/** グループの外の子孫が終わったかを見る間隔。 */
+const STRAY_POLL_MS = 50;
 
 interface Job {
 	summary: JobSummary;
@@ -58,6 +60,8 @@ interface Job {
 	/** こちらから止めた理由。最初の 1 つだけが残り、シェルの終わり方より優先する。 */
 	cause?: { state: JobState; reason?: string };
 	timers: Array<NodeJS.Timeout>;
+	/** 止めるときに見つけた、グループの外の子孫。 */
+	strays: number[];
 	/** onEnd を呼ぶところまで済んだら決まる。 */
 	done: Promise<JobSummary>;
 }
@@ -72,8 +76,66 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 	} catch {}
 }
 
+function signalEach(pids: number[], signal: NodeJS.Signals | 0): boolean {
+	let reached = false;
+	for (const pid of pids) {
+		try {
+			process.kill(pid, signal);
+			reached = true;
+		} catch {}
+	}
+	return reached;
+}
+
+/**
+ * シェルの子孫のうち、プロセスグループを抜けたもの。グループ宛てのシグナルは届かない。Linux だけ (/proc を読む)。
+ * bubblewrap の中身がこれに当たる。`--new-session` で別のセッションになり、グループには launcher だけが残る。
+ * launcher に SIGTERM を送ると中身は pid namespace ごと即座に消えるので、中身に先に送らないと `trap` の後始末が走らない。
+ * 中身の先頭 (namespace の init になった bubblewrap) も数に入るが、init はハンドラの無いシグナルを外から受けても無視するので、
+ * 送っても中身は消えない (bubblewrap 0.13.0 は SIGTERM のハンドラを持たない。/proc/<pid>/status の SigCgt で確かめた)。
+ * 親が先に終わって init に引き取られたものは、もう子孫ではないので見つからない。
+ */
+function strays(shell: number): number[] {
+	if (process.platform !== "linux") return [];
+	const children = new Map<number, number[]>();
+	const group = new Map<number, number>();
+	try {
+		for (const name of readdirSync("/proc")) {
+			if (!/^\d+$/.test(name)) continue;
+			try {
+				const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+				// comm は空白も括弧も含められる。数えるのは最後の ")" の後ろから。
+				const [, parent, pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ").map(Number);
+				children.set(parent, [...(children.get(parent) ?? []), Number(name)]);
+				group.set(Number(name), pgrp);
+			} catch {}
+		}
+	} catch {}
+	const found: number[] = [];
+	for (const queue = [shell]; queue.length > 0; ) {
+		for (const child of children.get(queue.shift()!) ?? []) {
+			queue.push(child);
+			if (group.get(child) !== shell) found.push(child);
+		}
+	}
+	return found;
+}
+
+/**
+ * コマンドの前に置くシェル断片。持ち主 (このプロセス) が後始末なしに死んだら、job のグループを止める。
+ * 持ち主は fd 3 のパイプを開けたままにしていて、死ぬと閉じる。見張りはその EOF を待つだけで、ポーリングしない。
+ * 端末が消えたときやクラッシュでは `session_shutdown` が来ないか、待ってもらえない。job は detached なので、何もしなければ残る。
+ * SIGTERM を無視するのは、自分の送った SIGTERM で猶予の後の SIGKILL まで届かなくなるから。
+ * fd 3 は見張りに渡したら閉じる。コマンドとその子に継がせると、それが生きている間 EOF が来ない。
+ * 見張りを job のシェルの子として `&` で起こさない (外側の subshell を挟んで孫にし、すぐ手放す)。シェルの子のままだと、
+ * コマンドの引数なしの `wait` が見張りまで待って終わらず、`jobs` と `$!` にも見張りが出る。グループは同じなので止め方は変わらない。
+ */
+const orphanWatch = (graceMs: number): string =>
+	`( ( trap '' TERM; read -r -u 3; kill -s TERM -- -$$; sleep ${graceMs / 1000}; kill -s KILL -- -$$ ) >/dev/null 2>&1 & ); exec 3<&-`;
+
 /** 文字列にするのは読むときだけ。Buffer のまま切れば、マルチバイト文字の途中に当たっても投げない。 */
-function renderTail(buffer: Buffer): string {
+export function renderTail(given: Buffer): string {
+	const buffer = given.subarray(-TAIL_BYTES);
 	let start = 0;
 	for (let i = buffer.length - 2, lines = 0; i >= 0; i--) {
 		if (buffer[i] === 0x0a && ++lines === TAIL_LINES) {
@@ -108,8 +170,25 @@ export function createJobManager(options: JobManagerOptions = {}): JobManager {
 	const end = (job: Job, cause: NonNullable<Job["cause"]>) => {
 		if (job.summary.state !== "running" || job.cause) return;
 		job.cause = cause;
-		signalGroup(job.child, "SIGTERM");
-		job.timers.push(setTimeout(() => signalGroup(job.child, "SIGKILL"), killGraceMs));
+		const group = () => {
+			signalGroup(job.child, "SIGTERM");
+			job.timers.push(
+				setTimeout(() => {
+					signalGroup(job.child, "SIGKILL");
+					signalEach(job.strays, "SIGKILL");
+				}, killGraceMs),
+			);
+		};
+		job.strays = strays(job.child.pid!);
+		if (!signalEach(job.strays, "SIGTERM")) return group();
+		// グループの外の子孫が終わるのを先に待つ。sandbox の中身はここで終わり、launcher とシェルも続いて終わる。
+		const deadline = Date.now() + killGraceMs;
+		const poll = setInterval(() => {
+			if (Date.now() < deadline && signalEach(job.strays, 0)) return;
+			clearInterval(poll);
+			group();
+		}, STRAY_POLL_MS);
+		job.timers.push(poll);
 	};
 
 	// data のハンドラからも呼ぶ。投げると Pi ごと落ちる。
@@ -145,13 +224,15 @@ export function createJobManager(options: JobManagerOptions = {}): JobManager {
 
 	const track = (summary: JobSummary, child: ChildProcess, fd: number, timeoutSeconds: number | undefined): Job => {
 		let settle!: (summary: JobSummary) => void;
-		const job: Job = { summary, child, fd, bytes: 0, tail: Buffer.alloc(0), timers: [], done: new Promise((resolve) => (settle = resolve)) };
+		const job: Job = { summary, child, fd, bytes: 0, tail: Buffer.alloc(0), timers: [], strays: [], done: new Promise((resolve) => (settle = resolve)) };
 		let finished = false;
 		const finish = () => {
 			if (finished) return;
 			finished = true;
 			for (const timer of job.timers) clearTimeout(timer);
 			closeLog(job);
+			// 見張りはグループごと止めた後。閉じないと job ごとに fd が 1 つ残る。
+			child.stdio[3]?.destroy();
 			active.delete(job);
 			forget();
 			settle({ ...summary });
@@ -176,6 +257,7 @@ export function createJobManager(options: JobManagerOptions = {}): JobManager {
 			summary.endedAt = Date.now();
 			// `sleep 100 &` のように残された子は、止めないと孤児になってパイプも閉じない。
 			signalGroup(child, "SIGKILL");
+			signalEach(job.strays, "SIGKILL");
 			job.timers = [
 				setTimeout(() => {
 					child.stdout!.destroy();
@@ -195,7 +277,7 @@ export function createJobManager(options: JobManagerOptions = {}): JobManager {
 	 */
 	const ended = async (waited: Job[]) => {
 		let timer: NodeJS.Timeout | undefined;
-		const giveUp = new Promise((resolve) => (timer = setTimeout(resolve, killGraceMs + 4 * DRAIN_GRACE_MS)));
+		const giveUp = new Promise((resolve) => (timer = setTimeout(resolve, 2 * killGraceMs + 4 * DRAIN_GRACE_MS)));
 		await Promise.race([Promise.all(waited.map((job) => job.done)), giveUp]);
 		clearTimeout(timer);
 	};
@@ -227,13 +309,16 @@ export function createJobManager(options: JobManagerOptions = {}): JobManager {
 					starting--;
 					signal?.removeEventListener("abort", onAbort);
 					if (child?.pid) signalGroup(child, "SIGKILL");
+					child?.stdio[3]?.destroy();
 					closeSync(fd);
 					rmSync(logPath, { force: true });
 					reject(error);
 				};
 				const onAbort = () => abandon(new Error("jobs: aborted while the job was starting."));
 				try {
-					child = spawn("/bin/bash", ["-c", spec.command], { cwd: spec.cwd, env: spec.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+					child = spawn("/bin/bash", ["-c", `${orphanWatch(killGraceMs)}\n${spec.command}`], { cwd: spec.cwd, env: spec.env, detached: true, stdio: ["ignore", "pipe", "pipe", "pipe"] });
+					// 書くことも読むこともない。こちらが死んだことを相手に伝えるためだけに開けておく。
+					child.stdio[3]!.on("error", () => {});
 				} catch (error) {
 					return abandon(error as Error);
 				}

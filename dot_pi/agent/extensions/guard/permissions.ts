@@ -2,8 +2,14 @@ export type PermissionMode = "full" | "normal" | "ask" | "readonly";
 export type PermissionState = { version: 1; mode: PermissionMode };
 
 export const PERMISSIONS_ENTRY = "guard-permissions";
-/** 子孫の Pi に渡す環境変数。中身は `{ mode, root, git, pid }` の JSON。 */
+/** 子孫の Pi に渡す環境変数。中身は `{ mode, root, git, pid, ask }` の JSON。 */
 export const GUARD_ENV = "PI_GUARD";
+/**
+ * 親のモードを継いだ子の Pi が、guard が効いていることを知らせるために自分の stderr へ書く 1 行。
+ * 公式 sample の subagent は子の stderr を結果の `details.results[].stderr` に集めるので、親の guard がそこで探す。
+ * 子のモデルが出したものは道具の結果に入り、Pi のプロセスの stderr には出ない。
+ */
+export const GUARD_LOADED = "guard[subagent]: loaded with the parent session's permissions.";
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
 	return value === "full" || value === "normal" || value === "ask" || value === "readonly";
@@ -23,11 +29,17 @@ export function isPermissionState(data: unknown): data is PermissionState {
  * 壊れた値は無いものとして扱い、既定の normal で始める (full には落ちない)。readonly に倒さないのは、
  * 偽の値を置けるのが親の sandbox の中のプロセスだけで、どう扱っても親の境界より広がらないから。
  */
-export function inheritedState(value: string | undefined, pid: number): { mode: PermissionMode; root: string; git?: string } | undefined {
+export function inheritedState(value: string | undefined, pid: number): { mode: PermissionMode; root: string; git?: string; ask?: { dir: string; parent: number } } | undefined {
 	try {
 		const data = JSON.parse(value ?? "");
 		if (isPermissionMode(data.mode) && typeof data.root === "string" && data.pid !== pid) {
-			return { mode: data.mode, root: data.root, git: typeof data.git === "string" ? data.git : undefined };
+			return {
+				mode: data.mode,
+				root: data.root,
+				git: typeof data.git === "string" ? data.git : undefined,
+				// 確認を回す先 (ask.ts)。親が UI を持たないときは無い。
+				ask: typeof data.ask === "string" && typeof data.pid === "number" ? { dir: data.ask, parent: data.pid } : undefined,
+			};
 		}
 	} catch {}
 	return undefined;

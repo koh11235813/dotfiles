@@ -7,11 +7,14 @@
  * コピーを置かないのは、サンプル側の修正を取り込み損ねるため。
  *
  * サンプルに付属する prompt テンプレート (/implement など) も同じ理由でここから渡す。
+ *
+ * 足しているのは `worktree` の引数だけ (worktree.ts)。
  */
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { withWorktree } from "./worktree.ts";
 
 export default async function (pi: ExtensionAPI) {
 	const install = join(getAgentDir(), "install");
@@ -23,6 +26,6 @@ export default async function (pi: ExtensionAPI) {
 		"node_modules/@earendil-works/pi-coding-agent/examples/extensions/subagent/index.ts",
 	);
 	const { default: subagent } = await import(example);
-	await subagent(pi);
+	await subagent(withWorktree(pi));
 	pi.on("resources_discover", () => ({ promptPaths: [join(dirname(example), "prompts")] }));
 }
