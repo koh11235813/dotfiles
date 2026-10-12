@@ -11,7 +11,9 @@ export function extensionHost() {
 	const widgets = new Map<string, string[] | undefined>();
 	const statuses = new Map<string, string | undefined>();
 	const confirmations: string[] = [];
+	const messages: Array<{ message: Record<string, unknown>; options?: Record<string, unknown> }> = [];
 	let approved = false;
+	let idle = true;
 	let manager = SessionManager.inMemory(process.cwd());
 	const tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean }; sourceInfo?: { source: string; path: string } }> = [
 		{ name: "read", annotations: { readOnlyHint: true } },
@@ -29,7 +31,7 @@ export function extensionHost() {
 		ui, cwd: process.cwd(), mode: "tui", hasUI: true,
 		get sessionManager() { return manager; },
 		getContextUsage: () => ({ tokens: 200, contextWindow: 1000, percent: 20 }),
-		isIdle: () => true,
+		isIdle: () => idle,
 	} as unknown as ExtensionCommandContext;
 	const pi = {
 		on: (name: string, handler: Function) => {
@@ -41,14 +43,16 @@ export function extensionHost() {
 		registerTool: (tool: { name: string; execute: Function }) => { registeredTools.set(tool.name, tool); },
 		registerShortcut: (key: string, shortcut: { handler: Function }) => { shortcuts.set(key, shortcut); },
 		appendEntry: (type: string, data: unknown) => manager.appendCustomEntry(type, data),
+		sendMessage: (message: Record<string, unknown>, options?: Record<string, unknown>) => { messages.push({ message, options }); },
 		getAllTools: () => tools,
 	} as unknown as ExtensionAPI;
 	return {
-		pi, ctx, notices, widgets, statuses, confirmations, commands, shortcuts, tools, registeredTools,
+		pi, ctx, notices, widgets, statuses, confirmations, messages, commands, shortcuts, tools, registeredTools,
 		resetRuntime: () => { handlers.clear(); commands.clear(); shortcuts.clear(); },
 		get manager() { return manager; },
 		replaceSession: (next = SessionManager.inMemory(process.cwd())) => { manager = next; },
 		approve: (value: boolean) => { approved = value; },
+		idle: (value: boolean) => { idle = value; },
 		command: async (name: string, args = "") => {
 			const command = commands.get(name);
 			if (!command) throw new Error(`Command /${name} is not registered`);

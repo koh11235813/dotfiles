@@ -8,6 +8,8 @@
  * - sandbox: 組み込みの bash を同名で差し替え、full 以外では書ける場所を root・一時ディレクトリ・
  *   EXTRA_WRITE_PATHS に絞り (readonly は専用の一時ディレクトリだけ)、READ_DENIED_PATHS を読めなくする。
  *   `tool_call` で command を書き換えないのは、transcript と規則表にモデルが書いたままの command を残すため。
+ * - monitor (monitor/index.ts) は待たずに走らせる bash で、規則表も sandbox もモードの判定も bash と同じものを通る。
+ *   sandbox は起動したときのモードで決まり、走っている間は変わらない。だからモードを厳しい側へ変えたら job を止める。
  * - edit / write は Pi のプロセス内 (Node の fs) で動き sandbox の外なので、同じ場所の外への書き込みを
  *   ここで confirm にする。そうしないと write が sandbox の抜け道になる。
  * - read / grep / find / ls / edit も同じ理由で、READ_DENIED_PATHS を指す呼び出しをここで confirm にする。
@@ -31,7 +33,8 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createBashToolDefinition, type ExtensionAPI, type ExtensionContext, isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { type BashSpawnHook, createBashToolDefinition, type ExtensionAPI, type ExtensionContext, isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { registerMonitor } from "./monitor/index.ts";
 import { GUARD_ENV, inheritedState, isPermissionMode, isPermissionState, judgePermission, PERMISSIONS_ENTRY, type PermissionMode, type PermissionState } from "./permissions.ts";
 import { BASH_RULES, chezmoiTarget, evaluate, PATH_RULES, type Rule } from "./rules.ts";
 import { containsHome, gitCommonDir, inside, READ_DENIED_PATHS, readDenied, sandboxArgv, sandboxAvailable, wrap, writeRoots } from "./sandbox.ts";
@@ -109,6 +112,9 @@ function readDeniedPath(denied: string[]): Rule {
 	};
 }
 
+/** 緩い順。 */
+const STRICTNESS: PermissionMode[] = ["full", "normal", "ask", "readonly"];
+
 export default function (pi: ExtensionAPI) {
 	const inherited = inheritedState(process.env[GUARD_ENV], process.pid);
 	let mode: PermissionMode = inherited?.mode ?? "normal";
@@ -143,26 +149,30 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", (_event, ctx) => restore(ctx));
-	pi.on("session_tree", (_event, ctx) => restore(ctx));
-	pi.on("session_shutdown", () => {
+	// 枝を移ると、移る前の枝で起こした job の結果が別の枝に届く。モードも枝ごとなので、job は持ち越さない。
+	pi.on("session_tree", async (_event, ctx) => {
+		restore(ctx);
+		await monitor.reset();
+	});
+	// readonly の job は scratch を TMPDIR にしている。止まるのを待ってから消す。
+	pi.on("session_shutdown", async () => {
+		await monitor.reset();
 		if (scratch) rmSync(scratch, { recursive: true, force: true });
 		scratch = undefined;
 	});
 
 	// モードは呼び出しのたびに読む (/permissions で途中から変わる)。`tool_call` を通らない経路で呼ばれても
 	// sandbox なしでは走らないよう、ここでも例外で止める。
-	pi.registerTool(
-		createBashToolDefinition(process.cwd(), {
-			spawnHook: (context) => {
-				if (mode === "full") return context;
-				const argv = sandboxArgv(roots(), readDenied());
-				if (!argv) throw new Error(`guard[sandbox]: no OS sandbox on ${process.platform}.`);
-				const wrapped = wrap(context, argv);
-				if (mode === "readonly") wrapped.env.TMPDIR = scratch;
-				return wrapped;
-			},
-		}),
-	);
+	const sandboxed: BashSpawnHook = (context) => {
+		if (mode === "full") return context;
+		const argv = sandboxArgv(roots(), readDenied());
+		if (!argv) throw new Error(`guard[sandbox]: no OS sandbox on ${process.platform}.`);
+		const wrapped = wrap(context, argv);
+		if (mode === "readonly") wrapped.env.TMPDIR = scratch;
+		return wrapped;
+	};
+	pi.registerTool(createBashToolDefinition(process.cwd(), { spawnHook: sandboxed }));
+	const monitor = registerMonitor(pi, sandboxed);
 
 	pi.registerCommand("permissions", {
 		description: "Show or set tool permissions: full, normal (sandboxed bash), ask, readonly",
@@ -178,13 +188,15 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				pi.appendEntry(PERMISSIONS_ENTRY, { version: 1, mode: requested } satisfies PermissionState);
+				const tightened = STRICTNESS.indexOf(requested) > STRICTNESS.indexOf(mode);
 				mode = requested;
 				publish();
+				if (tightened) await monitor.stopAll();
 			}
 			ctx.ui.notify(
 				[
 					`Permissions: ${mode}${inherited ? " (inherited from the parent Pi session)" : ""}. Write root: ${containsHome(root) ? `none (${root} contains your home directory, so it is not writable; start Pi in a project directory)` : root}`,
-					`full: no sandbox. normal (default): the bash tool runs in an OS sandbox that can write only to the write root, the temp dir and a few caches; edit/write outside those need confirmation. Outside full, the sandbox cannot read ${READ_DENIED_PATHS.map((entry) => entry().replace(homedir(), "~")).join(", ")}, and read/grep/find/ls/edit on those paths need confirmation. ask: normal, plus confirmation for every tool that is not read-only. readonly: bash runs with a read-only filesystem (private TMPDIR only); edit/write and tools without a trusted readOnlyHint are blocked.`,
+					`full: no sandbox. normal (default): the bash tool and monitor jobs run in an OS sandbox that can write only to the write root, the temp dir and a few caches; edit/write outside those need confirmation. Outside full, the sandbox cannot read ${READ_DENIED_PATHS.map((entry) => entry().replace(homedir(), "~")).join(", ")}, and read/grep/find/ls/edit on those paths need confirmation. ask: normal, plus confirmation for every tool that is not read-only. readonly: bash and monitor run with a read-only filesystem (private TMPDIR only); edit/write and tools without a trusted readOnlyHint are blocked.`,
 					`Sandbox: ${mode === "full" ? "off" : sandboxAvailable() ? "available" : "UNAVAILABLE, bash is blocked"}. Fixed guard rules apply in every mode.`,
 					"Not covered: your own ! commands, MCP and other extension tools (readOnlyHint is not verified), processes outside Pi. Network and all other reads are not restricted: grep/find on a parent directory still search inside the paths above, and secrets already in Pi's environment variables stay visible to bash. Mode is persisted per session and branch; subagents inherit it.",
 				].join("\n"),
@@ -196,8 +208,12 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		let rule: Rule | undefined;
 		let subject = "";
+		const shell = event.toolName === "bash" || event.toolName === "monitor";
 		if (isToolCallEventType("bash", event)) {
 			subject = event.input.command;
+			rule = evaluate(BASH_RULES, subject);
+		} else if (event.toolName === "monitor") {
+			subject = String((event.input as { command?: unknown }).command ?? "");
 			rule = evaluate(BASH_RULES, subject);
 		} else if (isToolCallEventType("edit", event) || isToolCallEventType("write", event)) {
 			subject = targetPath(event.input.path, ctx.cwd);
@@ -218,8 +234,8 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// sandbox が無いのに通すと、normal も readonly も名前だけになる。黙って素の bash に落とさない。
-		if (event.toolName === "bash" && mode !== "full" && !sandboxAvailable()) {
-			const reason = `guard[sandbox]: The OS sandbox is unavailable, so bash is disabled in ${mode} mode. Stop and tell the user: install bubblewrap (Linux, with unprivileged user namespaces enabled), or switch with /permissions full. Do not retry or route around this.`;
+		if (shell && mode !== "full" && !sandboxAvailable()) {
+			const reason = `guard[sandbox]: The OS sandbox is unavailable, so ${event.toolName} is disabled in ${mode} mode. Stop and tell the user: install bubblewrap (Linux, with unprivileged user namespaces enabled), or switch with /permissions full. Do not retry or route around this.`;
 			if (ctx.hasUI) ctx.ui.notify(reason, "warning");
 			return { block: true, reason };
 		}
