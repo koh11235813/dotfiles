@@ -208,5 +208,6 @@
   "autoContinueAtUsageLimit": false,
   "remoteControlAtStartup": true,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "cleanupPeriodDays": 1825
 }
