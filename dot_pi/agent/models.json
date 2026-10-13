@@ -34,6 +34,18 @@
                     }
                 }
             ]
+        },
+        "project-maya": {
+            "baseUrl": "http://133.15.70.55:8080/v1",
+            "api": "openai-completions",
+            "apiKey": "${MAYA_API_KEY}",
+            "models": [
+                {
+                    "id": "glm-5.3-flash",
+                    "reasoning": true,
+                    "contextWindow": 128000
+                }
+            ]
         }
     }
 }
