@@ -34,6 +34,7 @@ Pi のツール呼び出しを規則表で止め、bash と edit / write を OS 
 - `os.tmpdir()`、`/tmp`、`/var/tmp`。
 - git の common dir (root が linked worktree やリポジトリのサブディレクトリのとき)。
 - 道具が黙って書く先の表 (`sandbox.ts` の `EXTRA_WRITE_PATHS`)。実在するものだけ。
+- 人が `guard.json` の `allowWrite` で足した場所 (下の「人が足す場所」)。実在するものだけ。
 
 | 道具 | 開けている場所 | 開けていない場所と、止まったままの作業 |
 | --- | --- | --- |
@@ -50,6 +51,24 @@ chezmoi は特に、guard 自身が edit / write のたびに sandbox の外で 
 Arch で確かめたこと: `~/.config/chezmoi` が読み取り専用でも `chezmoi managed` / `status` / `source-path` は通る。`~/.cargo` が `registry` と `git` だけ書ける状態で `cargo build` は通る。
 bun・pipx・mise はこのホストに無く、uv は `~/.local/share/uv` が無いので、その行は動かして確かめていない。
 Go は issue が挙げた `~/go/pkg/mod` だけを開けた。checksum の置き場 `~/go/pkg/sumdb` は開けていないので、それがまだ無いホストでは、`go.sum` に無い module の取得が、ダウンロードの後の検証で `open .../go/pkg/sumdb/sum.golang.org/latest: no such file or directory` と出て失敗する (レビューでの実測)。`sumdb` が既にあれば読み取り専用でも通った。`latest` の書き直しが要る場合にどうなるかは確かめていない。開けるかどうかは未決 (issue に無い名前なので足していない)。
+
+**人が足す場所 (`guard.json` の `allowWrite`)。** Claude Code の `sandbox.filesystem.allowWrite` に当たるもの。
+
+- 置き場は agent dir の `guard.json` (`getAgentDir()`、既定は `~/.pi/agent/guard.json`)。中身は `{ "allowWrite": ["~/some/dir", "/abs/path"] }` だけで、ほかのキーは読まない。
+- `~` と `~/...` はホームディレクトリに展開する。相対パスと文字列でない要素は黙って飛ばす。
+- bash と edit / write の呼び出しのたびに読む。書き換えたら次の呼び出しから効き、Pi を起動し直さなくてよい。
+- 読めない、JSON でない、形が違うファイルは、何も足さないものとして扱う (エラーにしない)。
+- 足した場所も表と同じ手順を通る。無い場所と、読ませない場所に重なる場所は落とす。
+- 足さないもの。`/permissions` に `guard.json allowWrite rejected: ...` と理由つきで出す。
+  - ホームディレクトリを含む場所 (`~`、`/`)。root のときと同じ理由。
+  - agent dir と重なる場所 (agent dir 自身、その親、その中)。agent dir には `guard.json` 自身と `extensions/` と `auth.json` があり、書けると sandbox の中から書ける場所を自分で広げられる。
+  - 子の確認の置き場 (`~/.local/state/pi-guard`) と重なる場所。書けると、モデルが bash で `.answer` を置いて自分で承認できる (下の「subagent の子の Pi」)。
+- readonly では足さない。
+- `guard.json` が sandbox の中から書ける場所にあるとき (agent dir やその親で Pi を起動した) は、ファイルごと読まない。`/permissions` に `guard.json ignored: ...` と出す。書けるかは、足す前の書ける場所で見る。
+- project の中のファイルは読まない。root の中は sandbox の中から書けるので、モデルが自分で書ける場所を足せる。`shellPath` を外側のシェルに使わないのと同じ理由。
+- **足した場所には、git の hooks と config を書かせない決まり (`gitLocks`) が掛からない。** 塞ぐのは root と、その git の common dir の分だけ。git の checkout を足すと、その `.git/hooks` と `.git/config` は sandbox の中から書け、次にホスト側でそのリポジトリの git を打ったときに外で実行される。
+- 止めるのは上の 3 つだけ。シェルの rc のあるディレクトリ、`~/.config/chezmoi` などを足せば、そのまま開く。足した場所にある PATH の要素は、sandbox の外で起こす道具 (下の「そのほかの決めごと」) を探すときに飛ばす。
+- full では `guard.json` を守るものが無い。full のモデルが書き足した場所は、normal に戻した後の呼び出しから開く。
 
 ### 書かせない git の場所 (normal / ask)
 

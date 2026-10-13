@@ -40,13 +40,13 @@ import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { type BashSpawnHook, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition, type ExtensionAPI, type ExtensionContext, isToolCallEventType, type ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { type BashSpawnHook, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, isToolCallEventType, type ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { askDirName, askParent, serveAsks, sweepAsks } from "./ask.ts";
 import { registerMonitor } from "./monitor/index.ts";
 import { GUARD_ENV, GUARD_LOADED, inheritedState, isPermissionMode, isPermissionState, judgePermission, PERMISSIONS_ENTRY, type PermissionMode, type PermissionState } from "./permissions.ts";
 import { BASH_RULES, chezmoiTarget, evaluate, PATH_RULES, type Rule } from "./rules.ts";
 import { addWorktrees, report, type Run, type SubagentInput, taskRoot, type Worktree } from "./worktree.ts";
-import { contains, fileOperations, gitCommonDir, gitLocks, inside, type Lock, makeScratch, READ_DENIED_PATHS, readDenied, rootExcluded, sandboxArgv, sandboxAvailable, sweepScratch, viaShell, wrap, writeRoots } from "./sandbox.ts";
+import { allowWrite, contains, fileOperations, gitCommonDir, gitLocks, inside, type Lock, makeScratch, READ_DENIED_PATHS, readDenied, rootExcluded, sandboxArgv, sandboxAvailable, sweepScratch, viaShell, wrap, writeRoots } from "./sandbox.ts";
 
 /** ダイアログと通知に出す対象の上限。数十行のヒアドキュメントが画面を埋めないようにする。 */
 const SHOWN_LINES = 5;
@@ -266,13 +266,26 @@ export default function (pi: ExtensionAPI) {
 	 * full でも normal の書ける場所で見る。full に切り替える前に sandbox の中から置かれたものかもしれない。
 	 * worktree に絞られた子でも親の root で見る。親のモデルが親の root に置いたものかもしれない。
 	 */
-	const plantable = (): string[] => writeRoots("normal", inherited?.root ?? root, "", gitDir);
+	const plantable = (): string[] => writeRoots("normal", inherited?.root ?? root, "", gitDir, extras().paths);
+
+	/**
+	 * 人が設定で足した書ける場所 (sandbox.ts の allowWrite)。呼ぶたびに読む。
+	 * 設定ファイルが sandbox の中から書ける (agent dir やその親で Pi を起動した) ときは読まない。読むと、モデルが bash で
+	 * 書き足した場所が次の呼び出しから開く。書けるかは足す前の場所で見る。足した後の場所で見ると、設定の中身が
+	 * 「設定を読むかどうか」を決めることになる。見るのは plantable と同じく親の root (worktree に絞られた子でも)。
+	 * project の中の設定は探さない。root の中は sandbox の中から書けるので、置けたとしても上の決まりで読まないことになる。
+	 */
+	function extras() {
+		const file = join(getAgentDir(), "guard.json");
+		const ignored = inside(writeRoots("normal", inherited?.root ?? root, "", gitDir), file);
+		return { file, ignored, ...(ignored ? { paths: [], rejected: [] } : allowWrite(file, [getAgentDir(), asksHome()])) };
+	}
 
 	/** full では呼ばない。readonly の一時ディレクトリは sort など一時ファイルを作る道具が要るので、使うときに作る。 */
 	function roots(): string[] {
 		if (mode === "full") throw new Error("guard: full mode has no write roots.");
 		if (mode === "readonly" && !(scratch && existsSync(scratch))) scratch = makeScratch();
-		return writeRoots(mode, root, scratch ?? "", gitDir);
+		return writeRoots(mode, root, scratch ?? "", gitDir, extras().paths);
 	}
 
 	pi.on("session_start", (event, ctx) => {
@@ -429,10 +442,19 @@ export default function (pi: ExtensionAPI) {
 				if (tightened) await monitor.stopAll();
 			}
 			const excluded = rootExcluded(root);
+			const extra = extras();
+			const tilde = (path: string) => path.replace(homedir(), "~");
+			const extraLine = extra.ignored
+				? `guard.json ignored: ${extra.file} is writable from the sandbox.`
+				: [
+						extra.paths.length > 0 ? `Extra write paths in normal/ask (guard.json allowWrite; nonexistent ones are skipped): ${extra.paths.map(tilde).join(", ")}.` : "",
+						extra.rejected.length > 0 ? `guard.json allowWrite rejected: ${extra.rejected.map(({ path, reason }) => `${tilde(path)} (${reason === "home" ? "contains your home directory" : "overlaps a directory guard relies on being unwritable"})`).join(", ")}.` : "",
+					].filter(Boolean).join(" ");
 			ctx.ui.notify(
 				[
 					`Permissions: ${mode}${inherited ? " (inherited from the parent Pi session)" : ""}. Write root: ${excluded ? `none (${root} ${excluded === "home" ? "contains your home directory" : "overlaps a path the sandbox must not read"}, so it is not writable; start Pi in a project directory)` : root}`,
 					`full: no sandbox. normal (default): the bash tool, monitor jobs and the file I/O of edit/write run in an OS sandbox that can write only to the write root, the temp dir and a few tool caches, and cannot write git's hooks or config; edit/write outside those need confirmation, and a confirmed one is done outside the sandbox. Outside full, the sandbox cannot read ${READ_DENIED_PATHS.map((entry) => entry().replace(homedir(), "~")).join(", ")}, and read/grep/find/ls/edit on those paths (or grep/find on a directory containing them) need confirmation. ask: normal, plus confirmation for every tool that is not read-only. readonly: bash and monitor run with a read-only filesystem (private TMPDIR only); edit/write and tools without a trusted readOnlyHint are blocked.`,
+					...(extraLine ? [extraLine] : []),
 					`Sandbox: ${mode === "full" ? "off" : sandboxAvailable() ? "available" : "UNAVAILABLE, bash and edit/write are blocked"}. Fixed guard rules apply in every mode.`,
 					"Not covered: your own ! commands, MCP and other extension tools (readOnlyHint is not verified), processes outside Pi. Network and all other reads are not restricted, and secrets already in Pi's environment variables stay visible to bash. Mode is persisted per session and branch; subagents inherit it.",
 				].join("\n"),
