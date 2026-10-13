@@ -42,7 +42,7 @@ project の中 (`.pi/` など) には置かない。そこはモデルが edit /
 
 ## 結果の 4 つの状態
 
-フッターの status (`verify`) と `/verify` に、いつも次のどれかを出す。登録の無い project では何も出さない。
+フッターの status (`verify`) と `/verify` に、いつも次のどれかを出す。登録の無い project では何も出さない (git が見つからないときだけは別で、未実行の理由の表の最後の行)。
 
 | 表示 | 意味 |
 | --- | --- |
@@ -64,6 +64,7 @@ project の中 (`.pi/` など) には置かない。そこはモデルが edit /
 | タスクが中断されたので確かめていない | Esc で止めたタスクがファイルを変えていた。Pi は中断したタスクに `agent_before_settle` を送らない |
 | 確かめないままタスクが終わった | ファイルを変えたタスクが、検証を後に回したまま終わった |
 | git からファイル状態を取れなかった | `git ls-files` が失敗した |
+| git が見つからない (sandbox の中から書けない場所の PATH に無い) | guard が git の実体を返さなかった。`verify.json` にどこかの project の登録があるときだけ出す (下の「できないこと」) |
 | コマンド を guard が通さなかった: 理由 | guard が準備を断った (full 以外で OS の sandbox が使えない、固定の禁止に当たる)。sandbox なしでは走らせず、モデルへも戻さない |
 
 ## guard の sandbox とモード
@@ -74,7 +75,7 @@ guard が読み込まれていれば、検証コマンドは guard に準備を�
 | --- | --- |
 | `full` | sandbox なし |
 | `normal` / `ask` | bash ツールと同じ sandbox の中。書けるのは guard の書ける場所だけで、読ませない場所は読めない |
-| `readonly` | 読み取り専用の sandbox の中 (専用の `TMPDIR` だけ書ける)。失敗してもモデルへ差し戻さない |
+| `readonly` | 読み取り専用の sandbox の中 (専用の `TMPDIR` だけ書ける。macOS では `os.tmpdir()` も。guard の README の「そのほかの決めごと」)。失敗してもモデルへ差し戻さない |
 
 - 繋ぎ方は Pi のイベントバス。`pi.events.emit("guard:bash", { command, cwd, env, reply })` で頼むと、guard が `reply` に準備済みの `command` / `cwd` / `env` と、readonly かどうか (`readonly`) を渡すので、それを `/bin/bash -c` で起こす。返事が無ければ guard は居ないので、今までどおりそのまま起こす。guard の sandbox の部品を import する案は捨てた (境界を決める場所が 2 つになる)。
 - **ask でも確認は出さない。** 承認は `/verify add` を打った時点で済んでいる。タスクの終端のたびに訊き直すと、自動で確かめる意味が無くなる。モデルが書き換えられるのはコマンドが実行する中身 (テストコードなど) のほうで、それは sandbox が囲う。
@@ -121,8 +122,10 @@ git が無視していないファイル (追跡済みと未追跡) のパス・
 - **guard が読み込まれていないと、検証コマンドは Pi と同じ権限で走る。** sandbox を持つのは guard だけで、verify は頼むことしかしない。guard の読み込みに失敗した Pi でも、黙ってそのまま走らせる (guard が居ないことと、頼めなかったことを見分ける口が無い)。
 - **承認しているのはコマンドの文字列で、それが実行する中身ではない。** 登録したコマンドが読むテストコード・`package.json` の scripts・Makefile などは root の中にあり、モデルが edit / write で確認なしに書き換えられる。その中身が、タスクの終端で、確認なしに走る。guard があれば normal 以下では sandbox の中なので、届くのは bash ツールと同じ範囲まで。full と guard の無い Pi では、`~/.ssh`、`~/.zshrc`、`verify.json` 自身などにも届く。信用できないタスクでは登録を外しておく。
 - **ファイル状態を取る git は sandbox の外で走る。** `git rev-parse` と `git ls-files` を拡張のプロセスから直接起こしている (`core.fsmonitor` は無効にしている)。登録が 1 つも無くても、ターンの始めにリポジトリを探す `git rev-parse` は走る。
-  - git の実体は guard に訊く (Pi のイベントバスの `guard:binary`)。名前だけで起こすと PATH を探し、PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin`、mise の shims)、モデルが bash でそこに置いた `git` が、次のターンの始めに sandbox の外で走った (レビューでの実測)。guard は PATH の相対の要素と書ける場所の中にあるものを飛ばし、symlink を解いた先を返す (guard の README の「そのほかの決めごと」)。
-  - 書ける場所の外に git が無いホスト (mise で入れた git しか無い、など) では git を起こさず、リポジトリの外と同じ扱いになる (`/verify` は「git リポジトリの外では使えない」と出し、検証は走らない)。理由を分けた文面にはしていない。
+  - git の実体は guard に訊く (Pi のイベントバスの `guard:binary`)。名前だけで起こすと PATH を探し、PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin`、guard の `allowWrite` で開けた `~/.local/share/mise` の shims)、モデルが bash でそこに置いた `git` が、次のターンの始めに sandbox の外で走った (レビューでの実測)。guard は PATH の相対の要素と書ける場所の中にあるものを飛ばし、symlink を解いた先を返す (guard の README の「そのほかの決めごと」)。
+  - 書ける場所の外に git が無いホストでは git を起こさず、検証は走らない。`/verify` は、リポジトリの外のときとは別の文面 (`git が見つからない (sandbox の中から書けない場所の PATH に無い)`) を出す。`verify.json` に登録が 1 つでもあれば、セッションの最初 (途中で拾えなくなったら次のターンの始め) に同じ理由を status に出し、warning を 1 セッションに 1 度出す。
+    - 出すかどうかは「この project に登録があるか」ではなく「どこかの project に登録があるか」で決めている。project の鍵は git に訊くので、git が無いとここがどの project かが分からない。登録のある project が他にあれば、リポジトリの外や登録の無い project で起動しても出る。登録が 1 つも無いホストでは何も出さない。
+    - **mise の shim 経由の git は拾えないまま。** shim (`~/.local/share/mise/shims/git`) は mise 本体への symlink で、guard は symlink を解いた先の名前が違う候補を飛ばす。置き場が書けるかどうかには関わらない (置き場は、guard の既定では sandbox の中から書けない。guard の README の「そのほかの決めごと」)。mise で入れた git しか無いホストでは上の表示になり、検証は走らない。別の名前の実体への symlink を飛ばすことは guard のテストで見ているが、mise のあるホストでは確かめていない。
   - guard が読み込まれていなければ sandbox も無いので、今までどおり名前で起こす。
 - **`verify.json` を書けるモードでは、モデルが登録を書き換えられる。** full では止めるものが無い。normal 以下では guard が `~/.pi` を書ける場所に足していない (`guard/sandbox.ts` の `EXTRA_WRITE_PATHS`) が、`~/.pi` を含む場所で Pi を起動すれば書ける。
 - **git リポジトリの外では使えない。** ファイル状態を git の一覧から作るため。`/verify add` は断る。
@@ -135,6 +138,6 @@ git が無視していないファイル (追跡済みと未追跡) のパス・
 - **print / json モード (`pi -p`、subagent の子) でも走る。** 子が変更を加えるたびに子の中で検証が走り、親でももう 1 度走る。並列の子は互いの書きかけを見るので、「検証中にファイルが変わった」になりやすい。子を見分ける口が無いので止めていない。
 - **状態を取る時間はファイル数と大きさに比例する。** 1 つのタスクで 2〜3 回、無視されていない全ファイルを読む。
 - **`setsid` でグループを抜けた子孫は止められない。** シェルが終わってから 250 ms だけ出力を待ち、残っていても先へ進む。
-- **agmsg の完了報告には載せない。** このホストに agmsg が無い。
+- **agmsg の完了報告には載せない。** verify は agmsg を呼んでいない。
 - **人が手で走らせ直す入口は無い。** 中断や未実行の後 (登録を変えた後も) は、`!` でコマンドを打つか、次にファイルを変えるタスクを待つ。
 - 型検査はしていない (このリポジトリに tsc が無い)。API は型定義を読んで合わせた。実物の TUI での見え方 (status、custom message、Esc) も確かめていない。

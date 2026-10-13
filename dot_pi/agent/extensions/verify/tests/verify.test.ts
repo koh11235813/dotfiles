@@ -513,7 +513,7 @@ test("SIGTERM を無視するコマンドは SIGKILL で止める", async () => 
 	await until(() => !alive(Number(readFileSync(pidFile, "utf8"))));
 });
 
-test("シェルが終わった後に残った子は止め、グループを抜けて出力を握り続ける子は待たない", async () => {
+test("シェルが終わった後に残った子は止め、グループを抜けて出力を握り続ける子は待たない", { skip: !existsSync("/usr/bin/perl") }, async () => {
 	const pidFile = join(base, "pid-left");
 	const left = await run(`sleep 30 & echo $! > ${pidFile}; echo done`, base, { timeoutMs: 20_000, signal: never });
 	assert.deepEqual(left, { ended: "exited", code: 0, tail: "done" });
@@ -522,7 +522,9 @@ test("シェルが終わった後に残った子は止め、グループを抜�
 	// 抜け切る前にシェルが終わると、グループへの SIGKILL に巻き込まれる。抜けた側が pid を書くのを待つ。
 	const escapedPid = join(base, "pid-escaped");
 	const started = Date.now();
-	const escaped = await run(`setsid sh -c 'echo $$ > ${escapedPid}; exec sleep 30' & until [ -s ${escapedPid} ]; do sleep 0.01; done; echo done`, base, { timeoutMs: 20_000, signal: never });
+	// util-linux の setsid コマンドは macOS に無い。
+	const escape = `/usr/bin/perl -MPOSIX -e 'setsid(); open(F, ">", $ENV{PIDFILE}); print F "$$\\n"; close F; sleep 30'`;
+	const escaped = await run(`${escape} & until [ -s "$PIDFILE" ]; do sleep 0.01; done; echo done`, base, { timeoutMs: 20_000, signal: never, env: { ...process.env, PIDFILE: escapedPid } });
 	const pid = Number(readFileSync(escapedPid, "utf8"));
 	try {
 		assert.deepEqual(escaped, { ended: "exited", code: 0, tail: "done" });
@@ -575,6 +577,58 @@ test("git からファイル状態を取れなければ、走らせずに未実�
 	assert.deepEqual(lines(mark), []);
 	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(git から/);
 	assert.match(app.notices.at(-1)!, /^検証: 未実行 \(git から/);
+});
+
+test("登録があるのに git を拾えなければ、リポジトリの外とは別の文面でセッションに 1 度だけ知らせ、検証は走らせない", async () => {
+	const dir = repo();
+	const mark = join(base, "mark-no-git");
+	const app = await session(dir);
+	await app.command("verify", `add echo ran >> ${mark}`);
+	// guard の代わり。書ける場所の外の PATH に git が無いときの返事。
+	const off = app.pi.events.on("guard:binary", (data) => (data as { reply: (found?: string) => void }).reply(undefined));
+	app.notices.length = 0;
+
+	await app.emit("session_start");
+	assert.equal(app.notices.length, 1);
+	assert.match(app.notices[0]!, /git が見つからない/);
+	assert.doesNotMatch(app.notices[0]!, /リポジトリの外/);
+	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(git が見つからない/);
+
+	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
+	await task(app, () => writeFileSync(join(dir, "a.txt"), "three\n"));
+	assert.deepEqual(lines(mark), []);
+	assert.equal(app.notices.length, 1, "タスクのたびには知らせない");
+
+	await app.command("verify");
+	assert.match(app.notices.at(-1)!, /git が見つからない/);
+	assert.doesNotMatch(app.notices.at(-1)!, /リポジトリの外/);
+	await app.command("verify", "add true");
+	assert.match(app.notices.at(-1)!, /git が見つからない/);
+
+	await app.emit("session_start");
+	assert.equal(app.notices.filter((notice) => /^検証: 未実行 \(git が見つからない/.test(notice)).length, 2, "次のセッションではもう 1 度知らせる");
+
+	// git が拾えるようになったら、拾えなかった間の表示を残さない。
+	off();
+	await task(app, () => writeFileSync(join(dir, "a.txt"), "four\n"));
+	assert.deepEqual(lines(mark), ["ran"]);
+	assert.equal(app.statuses.get("verify"), "検証: 成功");
+});
+
+test("登録が 1 つも無ければ、git を拾えなくても何も出さない", async () => {
+	const store = join(process.env.PI_CODING_AGENT_DIR!, "verify.json");
+	const saved = readFileSync(store);
+	writeFileSync(store, JSON.stringify({ version: 1, projects: {} }));
+	try {
+		const app = await session(repo());
+		app.pi.events.on("guard:binary", (data) => (data as { reply: (found?: string) => void }).reply(undefined));
+		await app.emit("session_start");
+		await task(app);
+		assert.deepEqual(app.notices, []);
+		assert.equal(app.statuses.get("verify"), undefined);
+	} finally {
+		writeFileSync(store, saved);
+	}
 });
 
 test("同じインスタンスで session_start が来たら、前のセッションの結果を持ち越さない", async () => {
