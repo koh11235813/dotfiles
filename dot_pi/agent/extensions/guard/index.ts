@@ -6,7 +6,7 @@
  *
  * - 規則表: `tool_call` を拾い、bash の command と edit / write の path を照らす。
  * - sandbox: 組み込みの bash を同名で差し替え、full 以外では書ける場所を root・一時ディレクトリ・
- *   EXTRA_WRITE_PATHS に絞り (readonly は専用の一時ディレクトリだけ)、READ_DENIED_PATHS を読めなくする。
+ *   EXTRA_WRITE_PATHS に絞り (readonly は専用の一時ディレクトリだけ。macOS では os.tmpdir() も)、READ_DENIED_PATHS を読めなくする。
  *   `tool_call` で command を書き換えないのは、transcript と規則表にモデルが書いたままの command を残すため。
  * - monitor (monitor/index.ts) は待たずに走らせる bash で、規則表も sandbox もモードの判定も bash と同じものを通る。
  *   sandbox は起動したときのモードで決まり、走っている間は変わらない。だからモードを厳しい側へ変えたら job を止める。
@@ -40,13 +40,13 @@ import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { type BashSpawnHook, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, isToolCallEventType, type ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { type BashSpawnHook, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, isToolCallEventType, type ToolCallEvent, type ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { askDirName, askParent, serveAsks, sweepAsks } from "./ask.ts";
 import { registerMonitor } from "./monitor/index.ts";
 import { GUARD_ENV, GUARD_LOADED, inheritedState, isPermissionMode, isPermissionState, judgePermission, PERMISSIONS_ENTRY, type PermissionMode, type PermissionState } from "./permissions.ts";
 import { BASH_RULES, chezmoiTarget, evaluate, PATH_RULES, type Rule } from "./rules.ts";
 import { addWorktrees, report, type Run, type SubagentInput, taskRoot, type Worktree } from "./worktree.ts";
-import { allowWrite, contains, fileOperations, gitCommonDir, gitLocks, inside, type Lock, makeScratch, READ_DENIED_PATHS, readDenied, rootExcluded, sandboxArgv, sandboxAvailable, sweepScratch, viaShell, wrap, writeRoots } from "./sandbox.ts";
+import { allowWrite, cacheLocks, contains, fileOperations, gitCommonDir, gitLocks, inside, type Lock, makeScratch, READ_DENIED_PATHS, readDenied, rootExcluded, sandboxArgv, sandboxAvailable, sweepScratch, viaShell, wrap, writeRoots } from "./sandbox.ts";
 
 /** ダイアログと通知に出す対象の上限。数十行のヒアドキュメントが画面を埋めないようにする。 */
 const SHOWN_LINES = 5;
@@ -59,12 +59,12 @@ function head(subject: string): string {
 }
 
 /**
- * sandbox の外で起こす道具 (chezmoi と、ほかの拡張の git) の実体。PATH から探すが、相対の要素と、書ける場所の中にあるものは飛ばす。
- * sandbox の中から置ける場所のものを拾うと、次に sandbox の外で実行される。
+ * guard が起こす chezmoi と、ほかの拡張が sandbox の外で起こす道具 (git) の実体。PATH から探すが、相対の要素と、書ける場所の中にあるものは飛ばす。
+ * sandbox の中から置ける場所のものを拾うと、次に sandbox の外で実行される (chezmoi も full では外で起こす)。
  * 返すのは symlink を解いた先。PATH にあった候補のまま返すと、書ける場所に置いた symlink を、確かめた後で掛け替えられる。
  * 先の名前が違うもの (mise の shim のように、呼ばれた名前で振る舞いを変えるもの) も飛ばす。先を直に起こすと別のコマンドになる。
  * bwrap のように決まった絶対パスだけを見ないのは、置き場がホストごとに違う (Homebrew、pacman、`~/.local/bin`) からで、
- * 見つからなければ chezmoi の規則が黙って効かなくなる。
+ * 見つからなければ chezmoi の規則が効かなくなる。
  */
 function binary(name: string, writable: string[]): string | undefined {
 	return (process.env.PATH ?? "")
@@ -81,24 +81,33 @@ function binary(name: string, writable: string[]): string | undefined {
 }
 
 /**
- * chezmoi が管理するファイルの絶対パス。chezmoi が無い、または失敗するホストでは空。
- * ここで例外を通すと fail-closed で edit / write が全部止まるので、規則が効かない側に倒す。
+ * chezmoi が管理するファイルの絶対パス。実体を拾えなければ "missing"、起こして失敗したら (非ゼロ終了、時間切れ) "failed"。
+ * ここで例外を通すと fail-closed で edit / write が全部止まるので、規則が効かない側に倒す。倒したことは呼んだ側が人に知らせる。
  * 数十 ms で返るのでキャッシュしない。セッション中に `chezmoi add` された分も拾える。
+ *
+ * launcher は sandbox を起動する argv (full では空)。`managed` は source の template を評価する (`.chezmoiignore`、
+ * `.chezmoiremove`、`.chezmoiexternal.*` など)。root が chezmoi の source だとモデルがそれを書けるので、sandbox の外で起こすと
+ * `{{ output "..." }}` で任意のコマンドが外で走る。入口のファイルを名指しで守る道は取らない (サブディレクトリの
+ * `.chezmoiignore` のように、入口はどこにでも新しく作れる)。template の関数を切る chezmoi の設定も見つからなかった。
  */
-function chezmoiManaged(writable: string[]): Set<string> {
+function chezmoiManaged(writable: string[], launcher: string[]): Set<string> | "missing" | "failed" {
 	try {
 		const chezmoi = binary("chezmoi", writable);
-		if (!chezmoi) return new Set();
-		const out = execFileSync(chezmoi, ["managed", "--include=files", "--path-style=absolute"], {
+		if (!chezmoi) return "missing";
+		const [command, ...args] = [...launcher, chezmoi, "managed", "--include=files", "--path-style=absolute"];
+		const out = execFileSync(command, args, {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
 			timeout: 5000,
 		});
 		return new Set(out.split("\n").filter(Boolean));
 	} catch {
-		return new Set();
+		return "failed";
 	}
 }
+
+/** chezmoi を使っているホストか。使っていないホストで「chezmoi が見つからない」と知らせないために見る。 */
+const usesChezmoi = (): boolean => existsSync(join(homedir(), ".config", "chezmoi")) || existsSync(join(homedir(), ".local", "share", "chezmoi"));
 
 /**
  * edit / write が実際に開くパス。Pi の resolveToCwd (dist/core/tools/path-utils.js、実体は utils/paths.js の
@@ -171,6 +180,29 @@ function containsReadDenied(denied: string[]): Rule {
 	};
 }
 
+/**
+ * bash の結果に足す説明。モデルが読む。出力から写したもの (パスや errno の文面) は入れない。拾う行は、モデルのコマンドも
+ * リポジトリの中身 (`cat` したファイル) も自分で出せるので、写すと guard の名前でその文面をモデルに読ませることになる。
+ * 行を偽って足させても、得るのはこの固定の文だけ (README)。
+ */
+const GIT_CONFIG_NOT_SAVED =
+	"guard[git-locked]: git could not write .git/config, so the setting above was NOT saved, even if git printed a success message and exited with code 0. The sandbox keeps git's config read-only. Do not retry or route around this; if the setting is needed (upstream tracking, a remote, a submodule), ask the user to run the git command themselves, outside the sandbox.";
+const GIT_LOCK_KEPT =
+	"guard[git-locked]: The sandbox keeps .git/config and .git/hooks read-only, so they, and the repository directory that contains them, cannot be written, removed or moved from here; what the command above left behind stays. Do not retry or route around this; report what you wanted to remove or move, and the user can do it outside the sandbox.";
+
+/** git が config を書けなかった行の、config のパス。git は相対で出す (`.git/config`。`git -C sub` でも同じ)。 */
+const configNotWritten = (line: string): string | undefined => /could not write config file (.+): [^:]+$/.exec(line)?.[1];
+
+/** リポジトリの中の config の名前。相対のパスは、コマンドが cd した後の場所からなので、どのリポジトリのものかは決められない。 */
+const GIT_CONFIG_PATH = /(^|\/)\.git\/(modules\/.+\/)?config$/;
+
+/**
+ * `.git/config` か `.git/hooks` を指して断られた行 (`rm`、`mv`、`git clean`、リダイレクト)。errno の文面は macOS の seatbelt が
+ * Operation not permitted、bubblewrap が Device or resource busy (mount point) と Read-only file system (その中)。
+ * `mv sub sub2` のように `.git` のパスが出ない行は拾えない (README)。
+ */
+const GIT_LOCK_REFUSED = /\.git\/(config|hooks)(?![\w.-]).*(Operation not permitted|Device or resource busy|Read-only file system)/;
+
 /** subagent の子の最後の出力。公式 sample の getFinalOutput と同じ選び方 (text を持つ最後の assistant の、最初の text)。 */
 function lastOutput(messages: unknown): string {
 	for (const message of Array.isArray(messages) ? [...messages].reverse() : []) {
@@ -202,6 +234,10 @@ export default function (pi: ExtensionAPI) {
 	// 子孫は自分で git に訊かない。親のモデルが `.git` を書き換えた後かもしれない。
 	let gitDir = inherited?.git;
 	let scratch: string | undefined;
+
+	// chezmoi-target の規則が効いていないと人に知らせたか (下の chezmoiRule)。失敗は続いている間、実体が無いのはセッションの間。
+	let chezmoiFailing = false;
+	let chezmoiMissingTold = false;
 
 	// 子の確認を受け付けている間だけ持つ。asks は置き場、live はダイアログを出す先。
 	let asks: { dir: string; stop: () => void } | undefined;
@@ -270,7 +306,7 @@ export default function (pi: ExtensionAPI) {
 
 	/**
 	 * 人が設定で足した書ける場所 (sandbox.ts の allowWrite)。呼ぶたびに読む。
-	 * 設定ファイルが sandbox の中から書ける (agent dir やその親で Pi を起動した) ときは読まない。読むと、モデルが bash で
+	 * 設定ファイルが sandbox の中から書ける (root の中のファイルへの symlink にしている) ときは読まない。読むと、モデルが bash で
 	 * 書き足した場所が次の呼び出しから開く。書けるかは足す前の場所で見る。足した後の場所で見ると、設定の中身が
 	 * 「設定を読むかどうか」を決めることになる。見るのは plantable と同じく親の root (worktree に絞られた子でも)。
 	 * project の中の設定は探さない。root の中は sandbox の中から書けるので、置けたとしても上の決まりで読まないことになる。
@@ -288,6 +324,31 @@ export default function (pi: ExtensionAPI) {
 		return writeRoots(mode, root, scratch ?? "", gitDir, extras().paths);
 	}
 
+	/**
+	 * chezmoi-target の規則 (rules.ts)。一覧は `chezmoi managed` に訊く。full 以外では、どこにも書けない sandbox の中で訊く
+	 * (下の inspect と同じ形。理由は chezmoiManaged)。full は元から境界が無いので、そのまま起こす。
+	 * sandbox が使えないホストの full 以外では訊かない。その edit / write は judge が遮断するので規則が要らず、
+	 * 外で訊けば template が外で走る。
+	 *
+	 * 一覧が取れなければ規則は何にも当たらない。黙ってそうなると、守られていると思ったまま生成物を書き換えられるので、人に知らせる。
+	 * 失敗は、続いている間に 1 度 (直ってまた壊れたら知らせ直す)。実体が無いのは、セッションに 1 度、chezmoi を使っているホストでだけ。
+	 * 終了コード 0 で空の一覧 (`.chezmoiignore` に `*`) は、管理ファイルの無いホストと見分けられないので知らせない。
+	 */
+	function chezmoiRule(ctx: ExtensionContext): Rule {
+		const launcher = mode === "full" ? [] : sandboxAvailable() ? sandboxArgv([], readDenied()) : undefined;
+		const managed = launcher ? chezmoiManaged(plantable(), launcher) : new Set<string>();
+		const warn = (problem: string) => {
+			if (ctx.hasUI) ctx.ui.notify(`guard[chezmoi-target]: ${problem}, so the chezmoi-target rule is not in effect: edit/write on files that chezmoi generates is not confirmed.`, "warning");
+		};
+		if (managed === "failed" && !chezmoiFailing) warn("`chezmoi managed` failed or timed out (outside full mode it runs in a sandbox that cannot write anywhere; check the templates in the chezmoi source)");
+		chezmoiFailing = managed === "failed";
+		if (managed === "missing" && !chezmoiMissingTold && usesChezmoi()) {
+			chezmoiMissingTold = true;
+			warn("this host has a chezmoi config or source, but no usable chezmoi was found on PATH (relative entries, shims that resolve to another name such as mise's, and binaries in sandbox-writable places are skipped)");
+		}
+		return chezmoiTarget(typeof managed === "string" ? new Set() : managed);
+	}
+
 	pi.on("session_start", (event, ctx) => {
 		// 継いだ Pi は掃除しない。sandbox の pid namespace の中で起こされていると、外の Pi がみな居ないように見える。
 		if (event.reason === "startup" && !inherited) {
@@ -295,6 +356,8 @@ export default function (pi: ExtensionAPI) {
 			sweepAsks(asksHome());
 		}
 		restore(ctx);
+		chezmoiFailing = false;
+		chezmoiMissingTold = false;
 		if (inherited && !ctx.hasUI) process.stderr.write(`${GUARD_LOADED}\n`);
 	});
 	// 枝を移ると、移る前の枝で起こした job の結果が別の枝に届く。モードも枝ごとなので、job は持ち越さない。
@@ -322,7 +385,7 @@ export default function (pi: ExtensionAPI) {
 		const context = shellCommandPrefix ? { ...given, command: `${shellCommandPrefix}\n${given.command}` } : given;
 		const shell = shellPath?.replace(/^~(?=$|\/)/, homedir());
 		if (mode === "full") return shell ? viaShell(context, shell) : context;
-		const argv = sandboxArgv(roots(), readDenied(), gitLocks(root, gitDir));
+		const argv = sandboxArgv(roots(), readDenied(), [...gitLocks(root, gitDir), ...cacheLocks()]);
 		if (!argv) throw new Error(`guard[sandbox]: no OS sandbox on ${process.platform}.`);
 		const wrapped = wrap(context, argv, shell);
 		if (mode === "readonly") wrapped.env.TMPDIR = scratch;
@@ -353,7 +416,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// ほかの拡張が sandbox の外で起こす道具 (checkpoint と verify の git) の実体を訊く口。名前だけで起こすと PATH を探し、
-	// PATH の要素が書ける場所の中にあれば (root の中の `.venv/bin`、mise の shims)、モデルの置いたものが sandbox の外で走る。
+	// PATH の要素が書ける場所の中にあれば (root の中の `.venv/bin`、allowWrite で開けた mise の shims)、モデルの置いたものが sandbox の外で走る。
 	// 見つからなければ undefined を返す。返事が無い (guard が居ない) のとは別で、頼んだ側は名前で起こし直さない。
 	pi.events.on(BINARY_CHANNEL, (data) => {
 		const request = data as { name?: unknown; reply?: unknown } | null;
@@ -375,7 +438,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 	// worktree を作る git は bash と同じ sandbox。root と git の common dir に書く。
-	const git = gitIn(() => sandboxArgv(roots(), readDenied(), gitLocks(root, gitDir)));
+	const git = gitIn(() => sandboxArgv(roots(), readDenied(), [...gitLocks(root, gitDir), ...cacheLocks()]));
 	// 子が終わった後の差分を取る git は、どこにも書けない sandbox で打つ。子は自分の worktree の中に、その上で走る git が
 	// 実行する設定を用意できる (向け直した commondir の先の config、index に載せた入れ子のリポジトリの config)。
 	// bash と同じ書ける場所つきで打つと、子の用意したスクリプトが親の root と隣の worktree に書く。
@@ -406,7 +469,7 @@ export default function (pi: ExtensionAPI) {
 		const allowed = approved.get(id);
 		approved.delete(id);
 		if (mode === "full" || allowed === targetPath(path, cwd)) return undefined;
-		const argv = sandboxArgv(roots(), readDenied(), gitLocks(root, gitDir));
+		const argv = sandboxArgv(roots(), readDenied(), [...gitLocks(root, gitDir), ...cacheLocks()]);
 		if (!argv) throw new Error(`guard[sandbox]: no OS sandbox on ${process.platform}.`);
 		return fileOperations(argv);
 	}
@@ -453,7 +516,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(
 				[
 					`Permissions: ${mode}${inherited ? " (inherited from the parent Pi session)" : ""}. Write root: ${excluded ? `none (${root} ${excluded === "home" ? "contains your home directory" : "overlaps a path the sandbox must not read"}, so it is not writable; start Pi in a project directory)` : root}`,
-					`full: no sandbox. normal (default): the bash tool, monitor jobs and the file I/O of edit/write run in an OS sandbox that can write only to the write root, the temp dir and a few tool caches, and cannot write git's hooks or config; edit/write outside those need confirmation, and a confirmed one is done outside the sandbox. Outside full, the sandbox cannot read ${READ_DENIED_PATHS.map((entry) => entry().replace(homedir(), "~")).join(", ")}, and read/grep/find/ls/edit on those paths (or grep/find on a directory containing them) need confirmation. ask: normal, plus confirmation for every tool that is not read-only. readonly: bash and monitor run with a read-only filesystem (private TMPDIR only); edit/write and tools without a trusted readOnlyHint are blocked.`,
+					`full: no sandbox. normal (default): the bash tool, monitor jobs and the file I/O of edit/write run in an OS sandbox that can write only to the write root, the temp dir and a few tool caches, and cannot write git's hooks or config; edit/write outside those need confirmation, and a confirmed one is done outside the sandbox. Outside full, the sandbox cannot read ${READ_DENIED_PATHS.map((entry) => entry().replace(homedir(), "~")).join(", ")}, and read/grep/find/ls/edit on those paths (or grep/find on a directory containing them) need confirmation. ask: normal, plus confirmation for every tool that is not read-only. readonly: bash and monitor run with a read-only filesystem (private TMPDIR only, plus the per-user temp dir on macOS); edit/write and tools without a trusted readOnlyHint are blocked.`,
 					...(extraLine ? [extraLine] : []),
 					`Sandbox: ${mode === "full" ? "off" : sandboxAvailable() ? "available" : "UNAVAILABLE, bash and edit/write are blocked"}. Fixed guard rules apply in every mode.`,
 					"Not covered: your own ! commands, MCP and other extension tools (readOnlyHint is not verified), processes outside Pi. Network and all other reads are not restricted, and secrets already in Pi's environment variables stay visible to bash. Mode is persisted per session and branch; subagents inherit it.",
@@ -462,6 +525,30 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 	});
+
+	/**
+	 * bash の結果に、書かせない git の場所 (gitLocks) のせいで起きたことの説明を足す。
+	 * config を書けなかった git は、error の行のあとに成功の文面を出して終了コード 0 で終わることがあり (`git branch -u` など)、
+	 * モデルが成功と読み違える。git の設定や環境変数で非ゼロ終了にする手は無いので、結果のほうに書く。
+	 * 自分で clone したリポジトリを消せないのも、理由が出力からは分からない。
+	 * full では足さない (sandbox が無く、書けている)。見るのは届いた文面だけなので、モデルが stderr を捨てたときと、
+	 * Pi が切り詰めた分に行があったときは拾えない (README)。
+	 * structuredContent (bash を呼んだスクリプトが読む出力と終了コード) はそのまま返す。content だけを返すと Pi が落とす。
+	 */
+	function explainGitLocks({ content, structuredContent }: ToolResultEvent, cwd: string): Pick<ToolResultEvent, "content" | "structuredContent"> | undefined {
+		if (mode === "full") return undefined;
+		const text = content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+		const lines = text.split("\n");
+		const unsaved = lines.flatMap((line) => configNotWritten(line) ?? []);
+		// `.git` という名前でない common dir (bare に近い置き方、separate-git-dir) の config は、guard が守っている場所と照らす。
+		const guarded = (path: string) => GIT_CONFIG_PATH.test(path) || inside(gitLocks(root, gitDir).map((lock) => lock.path), resolve(cwd, path));
+		// 行が何本あっても説明は 1 つずつ。既に入っている結果 (もう一度通された) には足し直さない。
+		const notes = [
+			...(unsaved.some(guarded) ? [GIT_CONFIG_NOT_SAVED] : []),
+			...(lines.some((line) => configNotWritten(line) === undefined && GIT_LOCK_REFUSED.test(line)) ? [GIT_LOCK_KEPT] : []),
+		].filter((note) => !text.includes(note));
+		return notes.length > 0 ? { content: [...content, ...notes.map((note) => ({ type: "text" as const, text: note }))], structuredContent } : undefined;
+	}
 
 	// 子の Pi で guard が読み込まれない (拡張の読み込み失敗、別の agent dir) か、PI_GUARD を継がない (環境変数を作り直す
 	// spawner) と、子は規則表も sandbox も無しで動き、どこにも出ない。子は止められない (起こすのは別の拡張) ので、
@@ -476,6 +563,8 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolName === "subagent") partials.set(event.toolCallId, (event.partialResult as { details?: { results?: unknown } } | undefined)?.details?.results);
 	});
 	pi.on("tool_result", async (event, ctx) => {
+		// monitor の job の出力 (monitor / jobs ツール) は見ない。
+		if (event.toolName === "bash") return explainGitLocks(event, ctx.cwd);
 		if (event.toolName !== "subagent") return undefined;
 		const made = worktrees.get(event.toolCallId);
 		const isolated = made ? [{ type: "text" as const, text: await report(inspect, made) }] : [];
@@ -547,7 +636,7 @@ export default function (pi: ExtensionAPI) {
 			rule = evaluate(BASH_RULES, subject);
 		} else if (isToolCallEventType("edit", event) || isToolCallEventType("write", event)) {
 			subject = targetPath(event.input.path, ctx.cwd);
-			const rules = [...PATH_RULES, chezmoiTarget(chezmoiManaged(plantable()))];
+			const rules = [...PATH_RULES, chezmoiRule(ctx)];
 			// edit は書く前に読み、結果の diff で周りの行を返す。
 			if (mode !== "full" && event.toolName === "edit") rules.push(readDeniedPath(readDenied()));
 			if (mode === "normal" || mode === "ask") rules.push(gitLocked(gitLocks(root, gitDir)), outsideRoots(roots()));

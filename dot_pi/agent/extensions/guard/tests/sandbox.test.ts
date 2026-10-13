@@ -18,11 +18,14 @@ const dir = (...parts: string[]) => {
 	return path;
 };
 process.env.TMPDIR = dir("tmp");
+const realHome = process.env.HOME;
 process.env.HOME = dir("home");
 // agent dir は環境変数で決まる (SDK の getAgentDir)。開発機の本物の guard.json を読まないように、ここも一時ディレクトリへ向ける。
 process.env.PI_CODING_AGENT_DIR = dir("agent");
 delete process.env.PI_GUARD;
 after(() => rmSync(base, { recursive: true, force: true }));
+// macOS の readonly では、専用の一時ディレクトリのほかに os.tmpdir() も書ける (Apple の mktemp が TMPDIR を見ずにそこへ書く)。Linux では専用のものだけ。
+const darwinTmp = process.platform === "darwin" ? [join(base, "tmp")] : [];
 
 /** submodule を 2 つ (`sm` と、名前に / を含む `lib/deep`) 持つリポジトリ。 */
 function withSubmodules(name: string): { repo: string; git: string } {
@@ -39,14 +42,14 @@ function withSubmodules(name: string): { repo: string; git: string } {
 	return { repo, git: join(repo, ".git") };
 }
 
-test("normalとaskで書けるのはroot・一時ディレクトリ・実在するキャッシュだけで、readonlyは専用の一時ディレクトリだけ", () => {
+test("normalとaskで書けるのはroot・一時ディレクトリ・実在するキャッシュだけで、readonlyは専用の一時ディレクトリ (macOSではos.tmpdir()も) だけ", () => {
 	const root = dir("roots", "project");
 	const scratch = dir("roots", "scratch");
 	dir("home", ".cache");
 	const expected = [root, join(base, "tmp"), join(base, "home", ".cache")];
 	assert.deepEqual(writeRoots("normal", root, scratch), expected);
 	assert.deepEqual(writeRoots("ask", root, scratch), expected);
-	assert.deepEqual(writeRoots("readonly", root, scratch), [scratch]);
+	assert.deepEqual(writeRoots("readonly", root, scratch), [scratch, ...darwinTmp]);
 	dir("home", ".npm");
 	assert.deepEqual(writeRoots("normal", root, scratch), [...expected, join(base, "home", ".npm")]);
 });
@@ -56,12 +59,14 @@ test("道具が黙って書く先は書けるが、sandboxの外で次に実行�
 	const root = dir("roots", "tools");
 	const writable = [
 		dir("home", ".cargo", "registry"), dir("home", ".cargo", "git"),
-		dir("home", ".local", "share", "uv"), dir("home", ".local", "share", "pipx"), dir("home", ".local", "share", "mise"),
-		dir("home", "go", "pkg", "mod"), dir("home", ".bun", "install", "cache"), dir("home", ".config", "gh"),
+		dir("home", "go", "pkg", "mod"), dir("home", "go", "pkg", "sumdb"), dir("home", ".bun", "install", "cache"),
 		join(dir("home", ".config", "chezmoi"), "chezmoistate.boltdb"),
 	];
 	const closed = [
 		dir("home", ".cargo", "bin"), join(home, ".cargo", "config.toml"), dir("home", ".local", "share", "other"), join(home, ".local", "bin", "tool"),
+		// 実行ファイルの実体の置き場 (uv の python と tools、pipx の venv、mise の installs) と、シェルを起こせる alias を書ける gh の設定。
+		join(dir("home", ".local", "share", "uv"), "tools", "ruff", "bin", "ruff"), join(dir("home", ".local", "share", "pipx"), "venvs", "tool", "bin", "tool"),
+		join(dir("home", ".local", "share", "mise"), "installs", "node", "bin", "node"), join(dir("home", ".config", "gh"), "config.yml"),
 		dir("home", "go", "bin"), dir("home", ".bun", "bin"), join(home, ".config", "chezmoi", "chezmoi.toml"), join(home, ".config", "other"),
 	];
 	try {
@@ -70,7 +75,7 @@ test("道具が黙って書く先は書けるが、sandboxの外で次に実行�
 		for (const path of writable) assert.ok(roots.includes(path), path);
 		for (const path of writable) assert.equal(inside(roots, join(path, path.endsWith(".boltdb") ? "" : "file")), true, path);
 		for (const path of closed) assert.equal(inside(roots, path), false, path);
-		assert.deepEqual(writeRoots("readonly", root, dir("roots", "tools-scratch")), [join(base, "roots", "tools-scratch")]);
+		assert.deepEqual(writeRoots("readonly", root, dir("roots", "tools-scratch")), [join(base, "roots", "tools-scratch"), ...darwinTmp]);
 	} finally {
 		for (const name of [".cargo", ".local", "go", ".bun", ".config"]) rmSync(join(home, name), { recursive: true, force: true });
 	}
@@ -90,7 +95,7 @@ test("設定で足した場所はnormalとaskで書け、readonlyでは書けな
 			assert.equal(inside(roots, join(ssh, "config")), false, mode);
 		}
 		assert.ok(!writeRoots("normal", root, scratch).includes(shared));
-		assert.deepEqual(writeRoots("readonly", root, scratch, undefined, [shared]), [scratch]);
+		assert.deepEqual(writeRoots("readonly", root, scratch, undefined, [shared]), [scratch, ...darwinTmp]);
 	} finally {
 		rmSync(ssh, { recursive: true, force: true });
 	}
@@ -165,7 +170,7 @@ test("linked worktreeではrootの外にあるgitのcommon dirも書ける。roo
 		assert.ok(writeRoots("normal", root, "", gitCommonDir(root)).includes(join(repo, ".git")));
 	}
 	assert.ok(!writeRoots("normal", repo, "", gitCommonDir(repo)).includes(join(repo, ".git")));
-	assert.deepEqual(writeRoots("readonly", linked, dir("git", "scratch"), gitCommonDir(linked)), [join(base, "git", "scratch")]);
+	assert.deepEqual(writeRoots("readonly", linked, dir("git", "scratch"), gitCommonDir(linked)), [join(base, "git", "scratch"), ...darwinTmp]);
 });
 
 test("gitのcommon dirはrootごとに一度しか訊かず、後から.gitを書き換えても書ける場所は広がらない", () => {
@@ -184,7 +189,10 @@ test("/reloadでモジュールが評価し直されても、gitのcommon dirは
 	assert.equal(gitCommonDir(root), join(root, ".git"));
 	writeFileSync(join(root, ".git", "commondir"), `${join(victim, ".git")}\n`);
 	// Pi は拡張を moduleCache: false で読み直す。別のモジュール実体として読み込んで同じ状況を作る。
-	const reloaded: typeof import("../sandbox.ts") = await import("../sandbox.ts?reload");
+	// 読み直した sandbox.ts は SDK (getAgentDir) を解決し直す。テストの loader (tests/run.mjs) は SDK を本物の HOME の下の
+	// agent dir から探すので、読み込む間だけ HOME を戻す。
+	process.env.HOME = realHome;
+	const reloaded: typeof import("../sandbox.ts") = await import("../sandbox.ts?reload").finally(() => (process.env.HOME = join(base, "home")));
 	assert.notEqual(reloaded.gitCommonDir, gitCommonDir);
 	assert.equal(reloaded.gitCommonDir(root), join(root, ".git"));
 	// まだ訊いていない root は、読み直した後でも訊ける。
@@ -332,7 +340,8 @@ test("edit/writeのファイルI/Oは道具を絶対パスで呼び、Piの環�
 test("読ませない場所は無くても数え、symlinkならリンク先も数える", () => {
 	const home = process.env.HOME!;
 	// この時点では .ssh も .env も .zshenv も無い。
-	assert.deepEqual(readDenied(), [".ssh", ".env", ".zshenv", ".aws", ".netrc", ".git-credentials", ".pypirc"].map((name) => join(home, name)));
+	// 最後は Pi 自身の鍵の置き場。HOME ではなく agent dir (環境変数で変わる) の下にある。
+	assert.deepEqual(readDenied(), [...[".ssh", ".env", ".zshenv", ".aws", ".netrc", ".git-credentials", ".pypirc"].map((name) => join(home, name)), join(process.env.PI_CODING_AGENT_DIR!, "auth.json")]);
 	symlinkSync(dir("denied", "aws"), join(home, ".aws"));
 	try {
 		assert.deepEqual(readDenied().slice(3, 6), [join(home, ".aws"), join(base, "denied", "aws"), join(home, ".netrc")]);
@@ -349,7 +358,9 @@ test("読ませない場所と重なるrootは書ける場所にしない", () =
 	try {
 		assert.ok(!writeRoots("normal", inner, "").includes(inner));
 		assert.ok(!writeRoots("normal", outer, "").includes(outer));
-		assert.deepEqual(writeRoots("readonly", "", inner), []);
+		// agent dir も同じ。中に Pi の auth.json がある (まだ無くても、後から作られる場所として数える)。
+		assert.ok(!writeRoots("normal", process.env.PI_CODING_AGENT_DIR!, "").includes(process.env.PI_CODING_AGENT_DIR!));
+		assert.deepEqual(writeRoots("readonly", "", inner), darwinTmp);
 	} finally {
 		rmSync(join(home, ".netrc"));
 		rmSync(join(home, ".ssh"), { recursive: true });
@@ -627,12 +638,17 @@ test("sandboxの中からは.git/hooksと.git/configを書けず、commitなど�
 	const tracked = await main.run("git branch -u @{-1} 2>&1; echo code=$?");
 	assert.match(tracked.text, /could not write config file[\s\S]*set up to track[\s\S]*code=0/);
 	assert.equal(readFileSync(join(root, ".git", "config"), "utf8"), config);
+	// その出力が bash の結果として戻るときに、設定が保存されていないことの説明が足される。
+	const explain = (app: ReturnType<typeof extensionHost>, text: string) =>
+		app.emit("tool_result", { toolName: "bash", toolCallId: "call-1", input: {}, content: [{ type: "text", text }], isError: false, details: undefined }) as Promise<{ content: Array<{ text: string }> } | undefined>;
+	assert.match((await explain(main.app, tracked.text))?.content.at(-1)?.text ?? "", /^guard\[git-locked\]: .*NOT saved/);
 	// hooks が無いリポジトリでも、後から作って仕込めない。
 	rmSync(join(root, ".git", "hooks"), { recursive: true });
 	assert.equal((await main.run("mkdir -p .git/hooks && echo x > .git/hooks/pre-commit")).ok, false);
-	assert.deepEqual(readdirSync(join(root, ".git", "hooks")), []);
+	// bubblewrap は塞ぐために空の hooks を実物で作り、seatbelt はパスで拒否するだけで何も作らない。在れば空、無ければ無いまま。
+	assert.deepEqual(existsSync(join(root, ".git", "hooks")) ? readdirSync(join(root, ".git", "hooks")) : [], []);
 	// hooks が切れた symlink (共有の hooks へ向けていて、その先が消えた) でも、sandbox は起動する。
-	rmSync(join(root, ".git", "hooks"), { recursive: true });
+	rmSync(join(root, ".git", "hooks"), { recursive: true, force: true });
 	symlinkSync(join(base, "gitlock", "gone"), join(root, ".git", "hooks"));
 	assert.deepEqual(await main.run("echo hello"), { ok: true, text: "hello\n" });
 	rmSync(join(root, ".git", "hooks"));
@@ -681,6 +697,12 @@ test("sandboxの中からは、rootの下にある別のリポジトリと、起
 	assert.equal(existsSync(join(repo, ".git", "hooks", "pre-commit")), false);
 	const commit = await parent.run("cd app && echo a > a.txt && git add a.txt && git -c user.name=t -c user.email=t@example.com commit -q -m a && git log --oneline | wc -l");
 	assert.equal(commit.text.trim(), "1", commit.text);
+	// 消そうとすると config と hooks の殻が残る。その出力が bash の結果として戻るときに、guard が守っているせいだという説明が足される。
+	const removed = await parent.run("rm -rf app");
+	assert.equal(removed.ok, false);
+	assert.equal(existsSync(join(repo, ".git", "config")), true);
+	const explained = await parent.app.emit("tool_result", { toolName: "bash", toolCallId: "call-1", input: {}, content: [{ type: "text", text: removed.text }], isError: true, details: undefined }) as { content: Array<{ text: string }> } | undefined;
+	assert.match(explained?.content.at(-1)?.text ?? "", /^guard\[git-locked\]: .*removed or moved/, removed.text);
 	await parent.app.emit("session_shutdown");
 
 	// リポジトリでない root で起動して、sandbox の中で git init する。作った呼び出しの間は塞げないが、次の呼び出しからは塞ぐ。
@@ -761,7 +783,8 @@ test("full以外のbashは読ませない場所を読めず、ほかの読み取
 	const home = process.env.HOME!;
 	const root = dir("home", "deny-project");
 	const target = dir("deny", "target");
-	const secrets = [join(dir("home", ".ssh"), "id_test"), join(home, ".env"), join(home, ".zshenv"), join(target, "credentials"), join(home, ".git-credentials"), join(home, ".pypirc")];
+	const auth = join(process.env.PI_CODING_AGENT_DIR!, "auth.json");
+	const secrets = [join(dir("home", ".ssh"), "id_test"), join(home, ".env"), join(home, ".zshenv"), join(target, "credentials"), join(home, ".git-credentials"), join(home, ".pypirc"), auth];
 	try {
 		for (const path of secrets) writeFileSync(path, "SECRET\n");
 		// リンク先が HOME の外にある。
@@ -779,8 +802,8 @@ test("full以外のbashは読ませない場所を読めず、ほかの読み取
 		};
 		const routes = [
 			"cat ~/.ssh/id_test", "cat ~/.env", "cat ~/.zshenv", "cat ~/.ssh/../.zshenv", "cat keys/id_test", "cat ~/.aws/credentials", `cat ${target}/credentials`,
-			"cat ~/.git-credentials", "cat ~/.pypirc",
-			"cp ~/.env copy.txt; cat copy.txt", "ls ~/.ssh", "grep -r SECRET ~/.ssh ~/.env ~/.zshenv ~/.aws ~/.git-credentials ~/.pypirc",
+			"cat ~/.git-credentials", "cat ~/.pypirc", `cat ${auth}`,
+			"cp ~/.env copy.txt; cat copy.txt", "ls ~/.ssh", `grep -r SECRET ~/.ssh ~/.env ~/.zshenv ~/.aws ~/.git-credentials ~/.pypirc ${auth}`,
 		];
 		for (const mode of ["normal", "ask", "readonly"]) {
 			await app.command("permissions", mode);
@@ -796,9 +819,10 @@ test("full以外のbashは読ませない場所を読めず、ほかの読み取
 		for (const path of secrets) assert.equal(readFileSync(path, "utf8"), "SECRET\n");
 		await app.emit("session_shutdown");
 		await app.command("permissions", "full");
-		for (const command of routes.slice(0, 9)) assert.equal((await run(command)).text, "SECRET\n", command);
+		for (const command of routes.slice(0, 10)) assert.equal((await run(command)).text, "SECRET\n", command);
 	} finally {
 		for (const name of [".ssh", ".env", ".zshenv", ".aws", ".git-credentials", ".pypirc"]) rmSync(join(home, name), { recursive: true, force: true });
+		rmSync(auth, { force: true });
 	}
 });
 
@@ -809,8 +833,11 @@ test("normalでは/tmpと/var/tmpに書け、readonlyでは書けない", { skip
 	SHARED_TMP_PATHS.push(...sharedTmp);
 	const shared = ["/tmp", "/var/tmp"].map((path) => mkdtempSync(join(path, "guard-shared-")));
 	// Linux ではテスト用の HOME が /tmp の下にある。読ませない場所を含む /tmp が書ける場所から外れるので、よそへ向ける。
+	// agent dir も同じ (中の auth.json が読ませない場所)。
 	const home = process.env.HOME;
+	const agent = process.env.PI_CODING_AGENT_DIR;
 	process.env.HOME = "/nonexistent";
+	process.env.PI_CODING_AGENT_DIR = "/nonexistent/agent";
 	try {
 		const root = dir("shared", "project");
 		// Linux では root も一時ディレクトリも /tmp の中にあり、/tmp に畳まれて並びが変わる。
@@ -831,8 +858,82 @@ test("normalでは/tmpと/var/tmpに書け、readonlyでは書けない", { skip
 		await app.emit("session_shutdown");
 	} finally {
 		process.env.HOME = home;
+		process.env.PI_CODING_AGENT_DIR = agent;
 		SHARED_TMP_PATHS.splice(0);
 		for (const path of shared) rmSync(path, { recursive: true, force: true });
+	}
+});
+
+test("一時ディレクトリの中でも、Pi自身のコードのキャッシュには書けない", { skip: cannotRun }, async () => {
+	const tmp = realpathSync(tmpdir());
+	// jiti は在る場合、node-compile-cache はまだ無い場合。
+	dir("tmp", "jiti");
+	rmSync(join(tmp, "node-compile-cache"), { recursive: true, force: true });
+	const app = extensionHost();
+	guard(app.pi);
+	app.ctx.cwd = dir("caches", "project");
+	await app.emit("session_start");
+	const bash = app.registeredTools.get("bash")!;
+	const ok = async (command: string): Promise<boolean> => !(await bash.execute("call-1", { command }, undefined, undefined, app.ctx)).isError;
+	try {
+		for (const mode of ["normal", "ask"]) {
+			await app.command("permissions", mode);
+			assert.equal(await ok(`echo x > ${tmp}/plain-${mode}.txt`), true, mode);
+			for (const name of ["jiti", "node-compile-cache"]) {
+				assert.equal(await ok(`mkdir -p ${tmp}/${name} && echo x > ${tmp}/${name}/guard-index.mjs`), false, `${mode}: ${name}`);
+				assert.equal(existsSync(join(tmp, name, "guard-index.mjs")), false, `${mode}: ${name}`);
+			}
+			// ディレクトリごと動かして、同じ名前で作り直す道も無い。
+			assert.equal(await ok(`mv ${tmp}/jiti ${tmp}/jiti.old && mkdir ${tmp}/jiti`), false, mode);
+			assert.equal(existsSync(join(tmp, "jiti.old")), false, mode);
+		}
+	} finally {
+		await app.emit("session_shutdown");
+	}
+});
+
+test("macOSのreadonlyでは素のmktempが通り、rootの中には書けないまま", { skip: process.platform !== "darwin" }, async () => {
+	// Apple の mktemp は TMPDIR を見ずに、ユーザーごとの一時ディレクトリへ書く。実際の Pi では os.tmpdir() がそこを返すが、
+	// このファイルは TMPDIR を差し替えているので、その間だけ戻す。
+	const userTmp = realpathSync(execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim());
+	// root はその外に置く。base はユーザーごとの一時ディレクトリの中にあり、そこに置くと root ごと書ける場所に入る。
+	const root = realpathSync(mkdtempSync("/tmp/guard-mktemp-"));
+	const { TMPDIR, HOME, PI_CODING_AGENT_DIR } = process.env;
+	const app = extensionHost();
+	try {
+		guard(app.pi);
+		app.ctx.cwd = root;
+		// 起動時の掃除 (sweepScratch) が本物の一時ディレクトリを歩かないように、戻すのは始めた後。
+		await app.emit("session_start");
+		process.env.TMPDIR = userTmp;
+		assert.equal(realpathSync(tmpdir()), userTmp);
+		// テスト用の HOME と agent dir も base の中にある。読ませない場所を含む一時ディレクトリは書ける場所から外れるので、よそへ向ける。
+		process.env.HOME = "/nonexistent";
+		process.env.PI_CODING_AGENT_DIR = "/nonexistent/agent";
+		const bash = app.registeredTools.get("bash")!;
+		const run = async (command: string): Promise<{ ok: boolean; text: string }> => {
+			const result = await bash.execute("call-1", { command }, undefined, undefined, app.ctx);
+			return { ok: !result.isError, text: result.content[0].text };
+		};
+		await app.command("permissions", "readonly");
+		const made = await run("mktemp");
+		assert.equal(made.ok, true, made.text);
+		const file = realpathSync(made.text.trim());
+		assert.ok(file.startsWith(join(userTmp, "tmp.")), file);
+		rmSync(file);
+		// 開けた一時ディレクトリの中でも、Pi 自身のコードのキャッシュには書けない (ここは本物の置き場)。
+		for (const name of ["jiti", "node-compile-cache"]) {
+			assert.equal((await run(`mkdir -p ${userTmp}/${name} && echo x > ${userTmp}/${name}/pi-guard-test-probe`)).ok, false, name);
+			assert.equal(existsSync(join(userTmp, name, "pi-guard-test-probe")), false, name);
+		}
+		assert.equal((await run("echo ro > readonly.txt")).ok, false);
+		assert.deepEqual(readdirSync(root), []);
+	} finally {
+		// 途中で落ちても、本物の一時ディレクトリに readonly 用の一時ディレクトリを残さない。
+		await app.emit("session_shutdown");
+		for (const name of ["jiti", "node-compile-cache"]) rmSync(join(userTmp, name, "pi-guard-test-probe"), { force: true });
+		Object.assign(process.env, { TMPDIR, HOME, PI_CODING_AGENT_DIR });
+		rmSync(root, { recursive: true, force: true });
 	}
 });
 
@@ -977,11 +1078,12 @@ test("guard.jsonで足した場所はbashとwriteから書け、readonlyでは�
 test("guard.jsonがsandboxの中から書ける場所にあるときは読まない", { skip: cannotRun }, async () => {
 	const root = dir("selfwiden", "project");
 	const shared = dir("selfwiden", "shared");
-	const agent = process.env.PI_CODING_AGENT_DIR!;
-	process.env.PI_CODING_AGENT_DIR = dir("selfwiden", "project", "agent");
+	// guard.json が、root の中のファイルへの symlink (dotfiles のリポジトリから張っていて、そこで Pi を起動した)。
+	// agent dir ごと root の中に置く形では確かめられない。agent dir には読ませない場所 (auth.json) があり、その root は書ける場所から外れる。
+	const file = join(process.env.PI_CODING_AGENT_DIR!, "guard.json");
 	try {
-		const file = join(root, "agent", "guard.json");
-		writeFileSync(file, JSON.stringify({ allowWrite: [shared] }));
+		writeFileSync(join(root, "guard.json"), JSON.stringify({ allowWrite: [shared] }));
+		symlinkSync(join(root, "guard.json"), file);
 		const app = extensionHost();
 		guard(app.pi);
 		app.ctx.cwd = root;
@@ -992,7 +1094,7 @@ test("guard.jsonがsandboxの中から書ける場所にあるときは読まな
 		await app.command("permissions");
 		assert.ok(app.notices.at(-1)!.includes(`guard.json ignored: ${file} is writable from the sandbox`), app.notices.at(-1));
 	} finally {
-		process.env.PI_CODING_AGENT_DIR = agent;
+		rmSync(file, { force: true });
 	}
 });
 
