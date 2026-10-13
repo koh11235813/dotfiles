@@ -20,6 +20,7 @@
 - 基準は git の tree object で、一時 index に `git add -A` して `git write-tree` で作る。commit も stash も ref も作らず、利用者の index (staging) も動かさない。
 - tree の id はセッションに `checkpoint` という custom entry で残す。reload や再開では取り直さず、同じ基準を使う。別のリポジトリで再開したときと、tree が消えていたときは、次の依頼で取り直す。
 - 依頼のたびには取り直さない。1 つのタスクが何往復にもなると、途中で基準が進んで最初の状態へ戻れなくなる。区切りたいときは `/checkpoint new`。
+- **git が 2.54.x か 2.55.x のときは基準を取らない** (版を読めないときも)。この 2 つの版では、設定に書いた hook を止められない (「できないこと」の、設定に書いた hook の項)。理由は status に出し (`checkpoint: 基準を取らない (git 2.54.0 は設定に書いた hook を止められない。git 2.56 以上が要る)`)、依頼のたびに warning は出さない。`/checkpoint` はどの動詞でも理由を答えて終わる。
 
 ## 誰の変更に見えるか
 
@@ -60,22 +61,28 @@
 - **基準の tree はどこからも参照されていない**。`git gc` が期限切れ (既定で 2 週間) の object を消すと基準も消える。消えていたら次の依頼で取り直す。
 - **ツールが走っている間の編集**は見分けられない。Pi の `write` / `edit` が書いてから記録を取るまでの間に人が同じファイルを変えると、それも Pi が書いたものになる。
 - **リポジトリの外、submodule や入れ子のリポジトリの中**は見ない。入れ子のリポジトリは 1 つの項目として出るだけで、中のファイルは戻せない。
-- **改行の変換や clean / smudge filter** が効くファイルは、基準の中身と作業ツリーの中身がバイト単位で合わないので、Pi が書いただけでも「混じっている」に倒れる (確認が増える側)。
-- **git の設定はリポジトリのものを使う**。この拡張の git は sandbox の外で走るので、モデルの書ける `.git/config` (とそこからの include) のうち、コマンドを走らせると分かっているものは毎回無効にする: hooks ディレクトリの hook (`core.hooksPath`)、設定に書いた hook (下の項)、`core.fsmonitor`、`filter.*.clean` / `smudge` / `process`、`diff.external` と textconv、remote へ取りに行くこと (promisor remote を足して object を消すと、欠けた object を取りに行くときに `ext::` の url や `core.sshCommand` がコマンドを起こす。`GIT_NO_LAZY_FETCH=1` と空の `GIT_ALLOW_PROTOCOL` で止める)。それ以外の設定はそのまま効く。全部を数え上げたわけではない。
-  - **設定に書いた hook (`hook.<名前>.event` と `hook.<名前>.command`) は、event ごとに止める。** hooks ディレクトリを見ない hook なので `core.hooksPath=/dev/null` では止まらず、止める前は、基準を取る `git add` でそのコマンドが走った (git 2.56.0 で確かめた)。どの git にも `-c hook.post-index-change.enabled=false -c hook.post-checkout.enabled=false` を渡す。この拡張の git が出す event はこの 2 つ (index を書く `add` / `update-index` / `write-tree` と、`restore`)。設定の側に `hook.<event>.enabled=true` と書かれていても、渡したほうが勝つ。
+- **改行の変換**が効くファイルは、基準の中身と作業ツリーの中身がバイト単位で合わないので、Pi が書いただけでも「混じっている」に倒れる (確認が増える側)。
+- **git の設定はリポジトリのものを使う**。この拡張の git は sandbox の外で走るので、モデルの書ける `.git/config` (とそこからの include) のうち、コマンドを走らせると分かっているものは毎回無効にする: hooks ディレクトリの hook (`core.hooksPath`)、設定に書いた hook (下の項)、`core.fsmonitor`、`filter.*.clean` / `smudge` / `process` (利用者の設定にあるものも。下の「git が自分で起こすコマンド」)、`diff.external` と textconv、remote へ取りに行くこと (promisor remote を足して object を消すと、欠けた object を取りに行くときに `ext::` の url や `core.sshCommand` がコマンドを起こす。`GIT_NO_LAZY_FETCH=1` と空の `GIT_ALLOW_PROTOCOL` で止める)。それ以外の設定はそのまま効く。全部を数え上げたわけではない。
+  - **設定に書いた hook (`hook.<名前>.event` と `hook.<名前>.command`) は、event ごとに止める。止める鍵を知らない git 2.54 / 2.55 では、基準を取らない。** hooks ディレクトリを見ない hook なので `core.hooksPath=/dev/null` では止まらない。どの git にも `-c hook.post-index-change.enabled=false -c hook.post-checkout.enabled=false` を渡す。この拡張の git が出す event はこの 2 つ (index を書く `add` / `update-index` / `write-tree` と、`restore`)。設定の側に `hook.<event>.enabled=true` と書かれていても、渡したほうが勝つ。
     - 利用者の設定 (`~/.gitconfig`) に書いた、この 2 つの event の hook も、この拡張の git では走らない。
-    - `hook.<event>.enabled` を知らない git では効かない。確かめたのは 2.56.0 だけで、設定に書いた hook は読むのにこの鍵を知らない版があるかどうかは調べていない。
-    - 捨てた案: filter と同じように、設定から hook の名前を読んで 1 つずつ止める。読んでから git が走るまでの間に、sandbox の中の job が新しい名前を足せば抜けられる。
+    - **event ごとの鍵が効くのは git 2.56 から。** 2.54 と 2.55 は、設定に書いた hook を読むのにこの鍵を知らず、渡しても hook が走る。この 2 つの版では、hook の起きうる git (`add` / `update-index` / `write-tree` / `restore`) を起こさない: 基準を取らず、セッションに残っていた基準も使わず、`/checkpoint` はどの動詞でも理由を答えて終わる。版は、起こす git の実体に `--version` を訊いて、基準を取る前と `/checkpoint` のたびに確かめる (覚えない)。読めない版も取らない側に倒す。
+      - 実物で確かめた版: Apple Git 2.54.0 (macOS) では、この拡張と同じ引数の `git add -A` と `git restore` で設定の hook が走った。2.56.0 (Linux) では鍵が効いて走らなかった。2.47.3 (Linux) には設定に書いた hook という仕組み自体が無く、何も渡さなくても走らなかった。
+      - 確かめていない版: 2.55 と、2.48〜2.53。「仕組みが入ったのは 2.54、鍵が入ったのは 2.56」は、upstream の `Documentation/config/hook.adoc` を版ごとに比べて読んだもの。2.53 以前は門に掛けていないので、この読みが外れていれば、その版では設定の hook が走る。
+      - 理由を出す status は、git の作業ツリーの外で Pi を起動していても出る (版を先に訊く)。
+    - 捨てた案: 2.54 / 2.55 では名前ごとの `hook.<名前>.enabled=false` を渡す。filter と同じように設定から hook の名前を読んで 1 つずつ止めることになり、読んでから git が走るまでの間に、sandbox の中の job が新しい名前を足せば抜けられる。
     - 入れていない案: この拡張の git を、guard の sandbox の中で打つ (verify の検証コマンドと同じ `guard:bash` の口)。コマンドを起こす設定を数え上げなくて済むようになるが、readonly では基準を取れなくなり (`.git/objects` に書けない)、リポジトリの下の階層で Pi を起動したときに root の外のファイルを戻せなくなる。どちらを取るかは未決。
   - **この項の対策が破れると、人が git を打たなくても sandbox の外で実行される。** 基準を取る git は、最初の依頼のたびに (`before_agent_start`)、subagent の子の Pi の中でも、人の操作なしに走る。その git が読む設定は、Linux の normal / ask では sandbox の中から差し替えられる (無い `.git/commondir` を新しく作って、root の中に用意した config へ向ける。guard の README の「できないこと」)。だから、ここで止めていない「コマンドを起こす設定」が 1 つでもあれば、モデルが bash で仕込み、subagent を呼ぶだけで外に出られる。設定に書いた hook はこの形で実際に抜けられた (レビューでの実測)。
-  - 無効にする filter の一覧を読んでから git が走るまでの間に設定を書き換えられると防げない。
-  - **git の実体は guard に訊く** (Pi のイベントバスの `guard:binary`)。名前だけで起こすと PATH を探す。PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin` を有効にしたシェルから Pi を起動した、mise の shims)、モデルが bash でそこに置いた `git` が、次の `write` / `edit` (基準の中身を git に訊く) か次の依頼 (基準を取る) で、人の操作なしに sandbox の外で走った (レビューでの実測)。guard は PATH の相対の要素と書ける場所の中にあるものを飛ばし、symlink を解いた先を返す (guard の README の「そのほかの決めごと」)。
-    - 書ける場所の外に git が無いホスト (mise で入れた git しか無い、など) では git を起こさない。基準を取れず、`基準を取れなかった (sandbox の中から書けない場所の PATH に git が無い)` と知らせる。名前で起こし直すことはしない。
+  - 無効にする filter の一覧を読んでから git が走るまでの間に設定を書き換えられると防げない。利用者の設定 (`~/.gitconfig`、system) は sandbox の外にあるので、この隙は無い。ただし、利用者の設定が sandbox の中から書ける場所のファイルを `include.path` / `includeIf` で読み込んでいると、そこには同じ隙ができる。直していない。
+  - **git の実体は guard に訊く** (Pi のイベントバスの `guard:binary`)。名前だけで起こすと PATH を探す。PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin` を有効にしたシェルから Pi を起動した、guard の `allowWrite` で開けた `~/.local/share/mise` の shims)、モデルが bash でそこに置いた `git` が、次の `write` / `edit` (基準の中身を git に訊く) か次の依頼 (基準を取る) で、人の操作なしに sandbox の外で走った (レビューでの実測)。guard は PATH の相対の要素と書ける場所の中にあるものを飛ばし、symlink を解いた先を返す (guard の README の「そのほかの決めごと」)。
+    - 書ける場所の外に git が無いホスト (mise で入れた git しか無い、など) では git を起こさない。基準を取れず、`基準を取れなかった (sandbox の中から書けない場所の PATH に git が無い)` と知らせる。知らせるのは 1 セッションに 1 度で、セッションに残った基準を確かめるとき (再開、reload) か、最初の依頼のとき。次の依頼からは黙って取り直しを試す。`/checkpoint new` には毎回答える。名前で起こし直すことはしない。
     - guard が読み込まれていなければ sandbox も無いので、今までどおり名前で起こす。
-    - **git が自分で起こすコマンドは、今も git が PATH から探す。** リポジトリの設定にあるものは上で止めているが、利用者の設定 (`~/.gitconfig`) にある filter (`git lfs install` の `git-lfs` など) は止めていない。PATH に書ける場所の要素があるホストでは、モデルが `.gitattributes` でその filter を掛け、同じ名前のものを置けば、基準を取る `git add` がそれを外で起こす (git 2.56.0 で確かめた。利用者の設定に `filter.lfs.clean` を書き、root の中の PATH の要素に同じ名前のスクリプトを置いた)。git に渡す PATH から書ける場所の要素を削る案は入れていない。mise などで入れた filter が見つからなくなってそのファイルが基準から落ちるうえ、書ける場所の外の要素に置かれた symlink が書ける場所の中を指す形 (`uv tool install` が `~/.local/bin` に置くもの) は残る。どちらを取るかは未決。
+    - **git が自分で起こすコマンドは、今も git が PATH から探す。** 分かっているのは filter で、設定にあるものはすべて空にしてから git を起こす。リポジトリの設定のものだけでなく、利用者の設定 (`~/.gitconfig`、system) のものも空にするのは、絶対パスでない filter (`git lfs install` が書く `git-lfs clean -- %f` など) があると、PATH に書ける場所の要素があるホストでは、モデルが `.gitattributes` でその filter を掛け、同じ名前のものを置くだけで、基準を取る `git add` がそれを外で起こしたため (空にする前の実測。git 2.54.0 と 2.56.0)。`restore` の `git restore` にも空にして渡す。戻すパスに filter が掛からないと確かめた後でも、確認を待つ間に `.gitattributes` を書き換えれば smudge が走った。代償は下の「filter が掛かるファイルは戻せない」。git に渡す PATH から書ける場所の要素を削ることはしていない (削っても、書ける場所の外の要素に置かれた symlink が書ける場所の中を指す形、`uv tool install` が `~/.local/bin` に置くものは残る)。filter のほかに git が名前で起こすものがあれば、同じ形で抜けられる。この拡張の打つ git について、ほかには見つけていないが、数え上げて確かめたわけではない。
   - 根本は `.git` と PATH を守る guard 側の仕事。guard は normal / ask で `.git/config` と `.git/hooks` を sandbox の中から書けなくしている (guard の README の「書かせない git の場所」) が、そこに書いてある抜け道 (Linux で `.git/commondir` を新しく作る、など) と full では、この項の対策だけが残る。
 - **基準の中身が git から読めなくなっていたら戻さない**。`.git/objects` は sandbox の中から書けるので、基準の blob を消すことはできる。欠けたまま `git restore` を打つと、git は作業ツリーのファイルを消してから失敗する (git 2.56.0 で確かめた) ので、打つ前に基準の中身を読めるか確かめる。
-- **リポジトリの設定にある filter が掛かるファイルは戻せない** (`git lfs install --local`、git-crypt、nbstripout などを `.git/config` に入れている場合)。filter を走らせないので、基準の中身が filter を通した形 (LFS なら pointer) と通さない形のどちらにもなり、戻すと壊れうる。一覧と差分には出るが、差分も filter を通した形と比べたものになることがある。そのファイルを変えると、filter を通さない中身が `.git/objects` に入る。利用者の設定 (`~/.gitconfig` など) にある filter は止めないので、`git lfs install` の既定の入れ方なら今まで通り。
+- **filter が掛かるファイルは戻せない** (LFS、git-crypt、nbstripout など。filter がリポジトリの設定にあっても、利用者の設定 (`~/.gitconfig`、system) にあっても同じ)。この拡張の git は filter を走らせない (上の「git が自分で起こすコマンド」)。基準を取るとき、index と変わっていないファイルは index にある形 (filter を通した形。LFS なら pointer) のまま入り、変わっているファイルと未追跡のファイルは filter を通さない作業ツリーの中身で入る。基準の中身がどちらの形にもなり、戻すと壊れうるので、`restore` は断る。一覧と差分には出るが、差分は filter を通した形と通さない形を比べたものになることがある。
+  - **LFS で管理しているファイルは、index と違っていれば (変更済み、未追跡)、pointer ではなく生の中身で基準に入る。** 基準の後で変えたものも、一覧や差分を見るたびに生の中身が `.git/objects` に入る。その大きさのぶん `.git` が増え、`git gc` の期限まで残る。
+  - これは、利用者の設定の filter も空にしたことの代償。空にする前は、`git lfs install` の既定の入れ方 (利用者の設定に書く) なら LFS のファイルは pointer で基準に入り、戻せた。
+  - 形の入り方は、大文字に変えるだけの filter を利用者の設定に置いて確かめた (git 2.54.0)。git-lfs の実物では確かめていない。
 - **git が index に入れられないもの** (読めないファイル、commit の無い入れ子のリポジトリ) は基準に入らない。一覧に出ず、戻せない。知らせも出さない。
 - **skip-worktree / assume-unchanged の印が付いた index** (sparse checkout を含む) では、利用者の index の写しの側で印を外してから読むので、印の付いたファイルの数だけ `/checkpoint` が遅くなる。利用者の index の印は動かない。sparse index は写しの側で全ファイルに展開される。
 - **未追跡ファイルの中身が `.git/objects` に入る**。基準を取るとき、`/checkpoint`、`/checkpoint diff`、`restore` の前後のたびに、ignore されていない未追跡ファイルと変更のあるファイルの中身が object として書かれる。どこからも参照されないので `git gc` の期限 (既定で 2 週間) までは残る。`.gitignore` していない大きな生成物があるリポジトリでは、一覧を見るたびに `.git` が増える。
@@ -85,6 +92,6 @@
 - **居座る job があると、人が止めるまで戻せない**。書き込まない job (readonly で起こしたもの、ログを眺めるだけのもの) かどうかは見分けていない。
   - **`/jobs stop` で止まらない job があると、そのセッションでは戻せなくなる。** シグナルの届かない job (`sudo` で root になったものなど) を、monitor は止められずに `running` のまま一覧に残す (monitor の README の「できないこと」)。プロセスは本当に生きていて書き換えうるので、断るのは変えていない。戻せるようになるのは、その job が自分で終わるか、人がそのプロセスを終わらせるか (`sudo kill` など)、Pi を起動し直したとき (job の一覧は Pi のプロセスの中だけにあり、起動し直すと空になる。残ったプロセスが書き続けていても、もう見えない)。断り文にもそう書いてある。`sudo` の job を実際に起こして確かめてはいない (monitor のコードと README を読んで合わせた)。
 - **`monitor` 以外のプロセスは見ていない**。`!` で起こして残したプロセスや Pi の外のプロセスが書いている最中かどうかは分からない。直前に終わった job の知らせが、確認を待つ間に次のターンを起こすことはありうる (monitor は Pi が idle のときにターンを起こす)。書き換える直前に、Pi が動いていないか、job が走っていないか、中身が変わっていないかを確かめ直すので、そこで止まる。確かめ直してから書き終えるまでの間 (`git restore` 1 回ぶん) に始まったターンは止められない。
-- **TUI での見え方は確かめていない**。確認ダイアログと知らせに何を渡すかをテストしているだけ。
+- **TUI での見え方は確かめていない**。確認ダイアログと知らせと status に何を渡すかをテストしているだけ。
 - ファイル名が UTF-8 でないものは、一覧に出ても `restore` に渡せない。
 - **名前の頭に空白があるファイル**は、`restore` の後の空白 1 つに続けて名前をそのまま書けば渡せる。**末尾に空白があるファイル**は TUI からは渡せない。TUI が入力行の前後の空白を削ってから拡張に渡すため (Pi 1.1.0 の `interactive-mode.js` 2542 行)。
