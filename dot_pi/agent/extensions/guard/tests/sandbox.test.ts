@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import guard from "../index.ts";
-import { bwrap, containsHome, fileOperations, gitCommonDir, gitLocks, inside, readDenied, sandboxArgv, SANDBOX_NOT_STARTED, sandboxAvailable, seatbelt, SHARED_TMP_PATHS, wrap, writeRoots } from "../sandbox.ts";
+import { allowWrite, bwrap, containsHome, fileOperations, gitCommonDir, gitLocks, inside, readDenied, sandboxArgv, SANDBOX_NOT_STARTED, sandboxAvailable, seatbelt, SHARED_TMP_PATHS, wrap, writeRoots } from "../sandbox.ts";
 import { extensionHost } from "../../../tests/extension-host.ts";
 
 // 本物の HOME と一時ディレクトリを root にしない。os.tmpdir() の下に作った「外」が外でなくなる。
@@ -19,6 +19,8 @@ const dir = (...parts: string[]) => {
 };
 process.env.TMPDIR = dir("tmp");
 process.env.HOME = dir("home");
+// agent dir は環境変数で決まる (SDK の getAgentDir)。開発機の本物の guard.json を読まないように、ここも一時ディレクトリへ向ける。
+process.env.PI_CODING_AGENT_DIR = dir("agent");
 delete process.env.PI_GUARD;
 after(() => rmSync(base, { recursive: true, force: true }));
 
@@ -72,6 +74,76 @@ test("道具が黙って書く先は書けるが、sandboxの外で次に実行�
 	} finally {
 		for (const name of [".cargo", ".local", "go", ".bun", ".config"]) rmSync(join(home, name), { recursive: true, force: true });
 	}
+});
+
+test("設定で足した場所はnormalとaskで書け、readonlyでは書けない。無い場所と、読ませない場所に重なる場所は足されない", () => {
+	const root = dir("extras", "project");
+	const scratch = dir("extras", "scratch");
+	const shared = dir("extras", "shared");
+	const missing = join(base, "extras", "missing");
+	const ssh = dir("home", ".ssh");
+	try {
+		for (const mode of ["normal", "ask"] as const) {
+			const roots = writeRoots(mode, root, scratch, undefined, [shared, missing, ssh]);
+			assert.ok(roots.includes(shared), mode);
+			assert.equal(inside(roots, join(missing, "file")), false, mode);
+			assert.equal(inside(roots, join(ssh, "config")), false, mode);
+		}
+		assert.ok(!writeRoots("normal", root, scratch).includes(shared));
+		assert.deepEqual(writeRoots("readonly", root, scratch, undefined, [shared]), [scratch]);
+	} finally {
+		rmSync(ssh, { recursive: true, force: true });
+	}
+});
+
+test("guard.jsonのallowWriteは~を展開して読み、読めない・形が違うファイルは何も足さない", () => {
+	const home = process.env.HOME!;
+	const agent = dir("reader", "agent");
+	const file = join(dir("reader", "config"), "guard.json");
+	const read = (content: string) => {
+		writeFileSync(file, content);
+		return allowWrite(file, [agent]);
+	};
+	assert.deepEqual(allowWrite(join(base, "reader", "config", "missing.json"), [agent]), { paths: [], rejected: [] });
+	for (const content of ["", "{", "null", "[]", '"~/shared"', "{}", '{"allowWrite":"~/shared"}', '{"allowWrite":{"0":"~/shared"}}']) {
+		assert.deepEqual(read(content), { paths: [], rejected: [] }, content);
+	}
+	// 無い場所もそのまま返す。落とすのは writeRoots。
+	assert.deepEqual(read(JSON.stringify({ allowWrite: ["~/shared", "/abs/path"] })), { paths: [join(home, "shared"), "/abs/path"], rejected: [] });
+	// 相対パスと文字列でないものは飛ばす。`~user` は展開しないので相対パス。
+	assert.deepEqual(read(JSON.stringify({ allowWrite: ["relative/dir", "./here", "~other/dir", "", 1, null, ["/abs/nested"], { path: "/abs/object" }, "/abs/kept"] })), { paths: ["/abs/kept"], rejected: [] });
+	// 呼ぶたびに読み直す。
+	assert.deepEqual(read(JSON.stringify({ allowWrite: [] })), { paths: [], rejected: [] });
+});
+
+test("guard.jsonのallowWriteは、ホームディレクトリを含む場所と、agent dir・子の確認の置き場に重なる場所を足さず、理由を返す", () => {
+	const home = process.env.HOME!;
+	const agent = dir("reject", "pi", "agent");
+	const child = dir("reject", "pi", "agent", "extensions");
+	const sibling = dir("reject", "pi", "other");
+	symlinkSync(agent, join(base, "reject", "alias"));
+	const file = join(agent, "guard.json");
+	const asks = dir("reject", "state", "pi-guard");
+	const entries = ["~", "~/", "/", join(home, ".."), agent, join(base, "reject", "pi"), child, join(agent, "not-yet", "there"), join(base, "reject", "alias"), sibling, asks, join(base, "reject", "state")];
+	writeFileSync(file, JSON.stringify({ allowWrite: entries }));
+	assert.deepEqual(allowWrite(file, [agent, asks]), {
+		paths: [sibling],
+		rejected: [
+			{ path: home, reason: "home" },
+			{ path: `${home}/`, reason: "home" },
+			{ path: "/", reason: "home" },
+			{ path: join(home, ".."), reason: "home" },
+			{ path: agent, reason: "reserved" },
+			{ path: join(base, "reject", "pi"), reason: "reserved" },
+			{ path: child, reason: "reserved" },
+			{ path: join(agent, "not-yet", "there"), reason: "reserved" },
+			{ path: join(base, "reject", "alias"), reason: "reserved" },
+			{ path: asks, reason: "reserved" },
+			{ path: join(base, "reject", "state"), reason: "reserved" },
+		],
+	});
+	// agent dir を symlink 越しの名前で渡されても同じ。
+	assert.deepEqual(allowWrite(file, [join(base, "reject", "alias")]).paths, [sibling, asks, join(base, "reject", "state")]);
 });
 
 test("rootはsymlinkを解決して渡す", () => {
@@ -858,6 +930,70 @@ test("子の確認の置き場には、sandboxの中のbashから答えを置け
 	}
 	assert.deepEqual(readdirSync(asks), []);
 	await app.emit("session_shutdown");
+});
+
+test("guard.jsonで足した場所はbashとwriteから書け、readonlyでは書けず、ファイルを書き換えれば次の呼び出しから変わる", { skip: cannotRun }, async () => {
+	const root = dir("config", "project");
+	const shared = dir("config", "shared");
+	const file = join(process.env.PI_CODING_AGENT_DIR!, "guard.json");
+	try {
+		writeFileSync(file, JSON.stringify({ allowWrite: [shared, "~", process.env.PI_CODING_AGENT_DIR] }));
+		const app = extensionHost();
+		guard(app.pi);
+		app.ctx.cwd = root;
+		await app.emit("session_start");
+		const bash = app.registeredTools.get("bash")!;
+		const write = app.registeredTools.get("write")!;
+		const run = async (command: string): Promise<boolean> => !(await bash.execute("call-1", { command }, undefined, undefined, app.ctx)).isError;
+		const judged = (path: string) => app.emit("tool_call", { toolName: "write", toolCallId: "call-1", input: { path, content: "x" } });
+
+		assert.equal(await run(`echo bash > ${shared}/bash.txt`), true);
+		assert.equal(await judged(join(shared, "write.txt")), undefined);
+		assert.deepEqual(app.confirmations, []);
+		assert.equal((await attempt(write, { path: join(shared, "write.txt"), content: "write\n" }, app.ctx)).ok, true);
+		assert.deepEqual(readdirSync(shared).sort(), ["bash.txt", "write.txt"]);
+		// 足せなかったものは開かない。
+		assert.equal(await run(`echo x > ${file}`), false);
+		await app.command("permissions");
+		assert.match(app.notices.at(-1)!, new RegExp(`guard\\.json allowWrite.*: ${shared}\\. guard\\.json allowWrite rejected: ~ \\(contains your home directory\\), .*agent \\(overlaps a directory guard relies on being unwritable\\)`));
+
+		await app.command("permissions", "readonly");
+		assert.equal(await run(`echo ro > ${shared}/readonly.txt`), false);
+		await app.emit("session_shutdown");
+
+		await app.command("permissions", "normal");
+		writeFileSync(file, JSON.stringify({ allowWrite: [] }));
+		assert.equal(await run(`echo late > ${shared}/late.txt`), false);
+		assert.equal(((await judged(join(shared, "late.txt"))) as { block?: boolean }).block, true);
+		assert.match(app.confirmations.at(-1)!, /^guard: outside-write-roots/);
+		assert.deepEqual(readdirSync(shared).sort(), ["bash.txt", "write.txt"]);
+		await app.command("permissions");
+		assert.doesNotMatch(app.notices.at(-1)!, /guard\.json/);
+	} finally {
+		rmSync(file, { force: true });
+	}
+});
+
+test("guard.jsonがsandboxの中から書ける場所にあるときは読まない", { skip: cannotRun }, async () => {
+	const root = dir("selfwiden", "project");
+	const shared = dir("selfwiden", "shared");
+	const agent = process.env.PI_CODING_AGENT_DIR!;
+	process.env.PI_CODING_AGENT_DIR = dir("selfwiden", "project", "agent");
+	try {
+		const file = join(root, "agent", "guard.json");
+		writeFileSync(file, JSON.stringify({ allowWrite: [shared] }));
+		const app = extensionHost();
+		guard(app.pi);
+		app.ctx.cwd = root;
+		await app.emit("session_start");
+		const result = await app.registeredTools.get("bash")!.execute("call-1", { command: `echo x > ${shared}/file.txt` }, undefined, undefined, app.ctx);
+		assert.equal(result.isError, true);
+		assert.deepEqual(readdirSync(shared), []);
+		await app.command("permissions");
+		assert.ok(app.notices.at(-1)!.includes(`guard.json ignored: ${file} is writable from the sandbox`), app.notices.at(-1));
+	} finally {
+		process.env.PI_CODING_AGENT_DIR = agent;
+	}
 });
 
 test("editは実際のsandboxの中で読んで書き、rootの外と読ませない場所には届かない", { skip: cannotRun }, async () => {

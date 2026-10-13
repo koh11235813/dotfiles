@@ -8,9 +8,9 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { EditOperations, WriteOperations } from "@earendil-works/pi-coding-agent";
 import type { PermissionMode } from "./permissions.ts";
 import { WORKTREES_DIR } from "./worktree.ts";
@@ -200,13 +200,48 @@ export function rootExcluded(root: string): "home" | "denied" | undefined {
  * seatbelt は解決後のパスで照合するので、`/var/folders` のままでは `/private/var/folders` に当たらない。
  * git は gitCommonDir の結果。commit / fetch / worktree 操作が書く .git は、root が linked worktree や
  * リポジトリのサブディレクトリだと root の外にある。
+ * extra は人が設定で足した場所 (allowWrite)。表と同じ配列に入れて、無いものと読ませない場所に重なるものを同じ手順で落とす。
+ * readonly では足さない。readonly は「どこにも書かせない」で、足すと設定が 1 行あるだけで意味が変わる。
  */
-export function writeRoots(mode: Exclude<PermissionMode, "full">, root: string, scratch: string, git?: string): string[] {
+export function writeRoots(mode: Exclude<PermissionMode, "full">, root: string, scratch: string, git?: string, extra: string[] = []): string[] {
 	const paths =
-		mode === "readonly" ? [scratch] : [containsHome(root) ? undefined : root, tmpdir(), git, ...SHARED_TMP_PATHS, ...EXTRA_WRITE_PATHS.map((entry) => entry())];
+		mode === "readonly" ? [scratch] : [containsHome(root) ? undefined : root, tmpdir(), git, ...SHARED_TMP_PATHS, ...EXTRA_WRITE_PATHS.map((entry) => entry()), ...extra];
 	const found = [...new Set(paths.flatMap((path) => (path && real(path)) || []))].filter((path) => !overlapsDenied(path));
 	// 他の root の中にあるもの (普通のリポジトリの .git など) は重ねて書かない。
 	return found.filter((path) => !found.some((other) => other !== path && within(other, path)));
+}
+
+/**
+ * 人が設定ファイル (`<agent dir>/guard.json` の `allowWrite`) で足した書ける場所。`~` は展開する。実在は確かめない (writeRoots が落とす)。
+ * 覚えずに呼ぶたびに読む。覚えると、書き換えた後に Pi を起動し直すまで古い境界で動く。
+ * 読めない・JSON でない・形が違うファイルは、何も足さないものとして扱い、例外にしない。bash と edit / write のたびに呼ばれるので、
+ * 投げると設定の書き損じ 1 つでどの道具も動かなくなる。文字列でない要素と相対パスも黙って飛ばす (相対の起点にできるものが無い)。
+ *
+ * 足さずに理由を返すもの:
+ * - ホームディレクトリを含む場所。root のときと同じで、開けると `~/.ssh` もシェルの rc も書ける。
+ * - reserved と重なる場所 (どちら向きでも)。guard 自身が「sandbox の中から書けない」ことに頼っている場所で、渡すのは index.ts。
+ *   agent dir にはこのファイル自身と extensions/ と auth.json があり、書けると sandbox の中から書ける場所を自分で広げられる。
+ *   子の確認の置き場 (ask.ts) は、書けるとモデルが答えを置いて自分で承認できる。外側にあるものも、親ごと rename して差し替えられる。
+ * それ以外 (rc のあるディレクトリ、PATH の上のディレクトリなど) は止めない。何を開けるかは書いた人が決める。
+ */
+export function allowWrite(file: string, reserved: string[]): { paths: string[]; rejected: Array<{ path: string; reason: "home" | "reserved" }> } {
+	const paths: string[] = [];
+	const rejected: Array<{ path: string; reason: "home" | "reserved" }> = [];
+	let entries: unknown;
+	try {
+		entries = (JSON.parse(readFileSync(file, "utf8")) as { allowWrite?: unknown } | null)?.allowWrite;
+	} catch {}
+	const kept = reserved.map((path) => real(path) ?? path);
+	for (const entry of Array.isArray(entries) ? entries : []) {
+		if (typeof entry !== "string") continue;
+		const path = entry.replace(/^~(?=$|\/)/, homedir());
+		if (!isAbsolute(path)) continue;
+		if (containsHome(path)) rejected.push({ path, reason: "home" });
+		// 中にあるかは inside で見る (まだ無い場所でも、存在する祖先を解決して比べる)。外側にあるものは実在するので realpath で足りる。
+		else if (inside(kept, path) || kept.some((entry) => within(real(path) ?? path, entry))) rejected.push({ path, reason: "reserved" });
+		else paths.push(path);
+	}
+	return { paths, rejected };
 }
 
 /** 書ける場所の中にあっても書かせない場所。directory は、無いときに何として塞ぐかを決める。 */
