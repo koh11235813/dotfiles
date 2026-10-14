@@ -27,16 +27,16 @@ join は人が Pi の外で 1 度打つ。拡張は join しない。
 | --- | --- |
 | (何も出ない) | この cwd に Pi の登録が無い、agmsg が入っていない、UI の無い Pi |
 | `agmsg: <name>` | 名乗れた。未読を見張っている |
-| `agmsg: <name> は別のセッション (<owner>) が名乗っている。Notify は受けない` | 2 つ目の Pi (下) |
-| `agmsg: <name> を名乗れなかった (status=…)。Notify は受けない` | claim が held 以外の理由で通らなかった (`status=unverified …` など) |
-| `agmsg: この project に Pi の登録が複数ある (…) ので名乗らない` | 同じ cwd に Pi の名前が 2 つ以上 join してある |
-| `agmsg: Codex driver の watch-once.sh が無いので何もしない (…)` | 下の「借りている script」 |
-| `agmsg: script の置き場 (…) が作業ディレクトリと重なるので起こさない` | 下の「決めたこと」。登録を訊く前に決まるので、Pi の登録が無い cwd でも出る |
-| `agmsg: 一時ファイルの置き場 (…) が作業ディレクトリの中にあるので起こさない` | 下の「決めたこと」。これも登録が無くても出る |
-| `agmsg: 未読の監視が止まった (…)` | `watch-once.sh` が失敗した、または返らないので止めた (`exit -1`)。括弧の中は stderr の 1 行目か終了コード。`/reload` で取り直す |
+| `agmsg: <name> is claimed by another session (<owner>). Notify is off` | 2 つ目の Pi (下) |
+| `agmsg: could not claim <name> (status=…). Notify is off` | claim が held 以外の理由で通らなかった (`status=unverified …` など) |
+| `agmsg: not claiming: this project has more than one Pi registration (…)` | 同じ cwd に Pi の名前が 2 つ以上 join してある |
+| `agmsg: doing nothing: the Codex driver's watch-once.sh is missing (…)` | 下の「借りている script」 |
+| `agmsg: not started: the script directory (…) overlaps the working directory` | 下の「決めたこと」。登録を訊く前に決まるので、Pi の登録が無い cwd でも出る |
+| `agmsg: not started: the temp directory (…) is inside the working directory` | 下の「決めたこと」。これも登録が無くても出る |
+| `agmsg: stopped watching for unread Messages (…)` | `watch-once.sh` が失敗した、または返らないので止めた (`exit -1`)。括弧の中は stderr の 1 行目か終了コード。`/reload` で取り直す |
 
 未読が来ると、guard の monitor の入口 (`pi.events` の `monitor:event`) に `received` を 1 つ流す。
-中身は `source: "agmsg"`、`summary: "未読の Message が N 件ある"`、`wake: true`、`id` は `watch-once.sh` の `max_id`。
+中身は `source: "agmsg"`、`summary: "unread Messages: N"`、`wake: true`、`id` は `watch-once.sh` の `max_id`。
 monitor が、待機中の Pi のターンを起こしてこれをモデルに渡す。
 
 ## 何を起こすか
@@ -76,7 +76,7 @@ monitor が、待機中の Pi のターンを起こしてこれをモデルに�
 ## 借りている script
 
 未読を待つのに、Codex driver の `scripts/drivers/types/codex/watch-once.sh` を、その場所のまま呼んでいる。Codex の app-server bridge のための script で、Pi のためのものではない。
-agmsg の更新でこの script の場所・引数・出力が変わると、Notify は止まる (無ければ status に出して claim もしない。出力が変われば「未読の監視が止まった」になる)。upstream には伝えていない。
+agmsg の更新でこの script の場所・引数・出力が変わると、Notify は止まる (無ければ status に出して claim もしない。出力が変われば `stopped watching for unread Messages` になる)。upstream には伝えていない。
 
 Pi 用の driver (`scripts/drivers/types/pi/` の `type.conf`・`_delivery.sh`・`template.md`) も upstream (fujibee/agmsg) には無い。この dotfiles が配っている。無いと `join.sh … pi …` が型を知らないと断る。
 
@@ -86,7 +86,7 @@ Pi 用の driver (`scripts/drivers/types/pi/` の `type.conf`・`_delivery.sh`�
 - **Pi 向けの skill には、join / drop (`reset.sh`) / spawn / despawn の手順が残っている。** agmsg が描いたままで、driver の中身を変えない決まりなので削っていない。「join は人が Pi の外で打つ」「spawn はしない」は拡張の決まりで、モデルが skill の手順で打つのは止めていない。`join.sh` と `reset.sh` が書くのは `teams/<team>/config.json` で、`guard.json` の `allowWrite` (`db` だけ) に入っていないので normal の sandbox では書けないはずだが、打っては確かめていない。通った場合、`reset.sh` は登録を消すので、次の `session_start` から拡張は黙って何もしなくなる。skill の actas は「名乗る名前を変える」だけで lock に触れないので、モデルが名乗る FROM と拡張が claim した名前がずれうる。本文は `/agmsg` と案内するが、Pi の口は `/skill:agmsg`。
 - **`settings.json` に `skills` が既にあるホストでは、共有の skill の除外が入らない。** `modify_settings.json` は実ファイルにある key を残す。手で `"-~/.agents/skills/agmsg"` を足す。足さないと同名の skill がぶつかって Pi が警告を出す (使われるのは Pi 向け)。
 - **lock が消えると排他が効かない。** `watch-once.sh --owner` が外すのは、別の生きている session が持っている名前だけ (`lib/subscription.sh`)。`run/` の lock が消えると (`reset.sh`、手で消す)、先の Pi は受け続け、2 つ目の Pi も claim できる。script 単体で見ただけで、拡張を通しては確かめていない。
-- **claim が 30 秒で打ち切られると、lock を持ったまま Notify を受けないことがありうる。** `actas-claim.sh` は lock を取った後で pane の名付けと sync の起動をしてから `status=ok` を出す。そこで打ち切ると status は「名乗れなかった (exit -1)」になり、ほかの Pi は `held` になる。`/reload` で取り直せる (同じ pid の再 claim は通る)。起こしてはいない。
+- **claim が 30 秒で打ち切られると、lock を持ったまま Notify を受けないことがありうる。** `actas-claim.sh` は lock を取った後で pane の名付けと sync の起動をしてから `status=ok` を出す。そこで打ち切ると status は `could not claim <name> (exit -1)` になり、ほかの Pi は `held` になる。`/reload` で取り直せる (同じ pid の再 claim は通る)。起こしてはいない。
 - **sandbox の中のモデルは、他の agent の受信箱を読めて、既読にできる。** `inbox.sh` と `send.sh` は持ち主を確かめず、モデルの bash は agmsg の db に書ける (`guard.json` の `allowWrite`)。他の名前で送ることもできる。claim が守るのは「誰が Notify を受けるか」だけ。受け入れた制約。
 - **join したディレクトリより下で Pi を起こすと、何も起きない。** `identities.sh` は渡したパスそのものしか見ない (祖先を探すのは `actas-claim.sh` と `whoami.sh`)。登録が無いのと見分けられないので、status にも出ない。
 - **Notify が届いても、モデルが読むとは限らない。** 伝えるのは件数だけで、読むかどうかはモデルが決める。monitor は、人の入力なしに続けて起こすターンを 3 回までにしている (`../guard/monitor/README.md`)。

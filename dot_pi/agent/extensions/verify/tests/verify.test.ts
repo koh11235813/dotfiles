@@ -149,7 +149,7 @@ test("タスクの途中で登録を全部外したら、何も走らせずに�
 	assert.deepEqual(app.notices, []);
 	assert.equal(app.statuses.get("verify"), undefined);
 	await app.command("verify", "add true");
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run/);
 });
 
 test("git リポジトリの外では登録を断る", async () => {
@@ -177,11 +177,11 @@ test("失敗は agent_before_settle で出力の末尾と一緒にモデルへ�
 	assert.equal(entry!.type, "custom_message");
 	assert.equal(entry!.customType, "verify");
 	assert.match(entry!.content, /grep -q fixed a\.txt/, "どのコマンドが落ちたか");
-	assert.match(entry!.content, /終了コード 3/);
+	assert.match(entry!.content, /exit code 3/);
 	assert.match(entry!.content, /checking\na\.txt is not fixed/, "stdout と stderr の末尾");
 	assert.equal(boundaries[1], undefined, "通ったら続行しない");
 	assert.equal(app.notices.length, 1, "途中の失敗では知らせず、最終結果を 1 度だけ知らせる");
-	assert.match(app.notices[0]!, /検証: 成功/);
+	assert.match(app.notices[0]!, /verify: passed/);
 });
 
 test("他の拡張が積んだ entry を落とさず、続行が既に決まっているか入力が待っているときは検証を後に回す", async () => {
@@ -210,15 +210,15 @@ test("後に回したまま境界が来ずにタスクが終わったら、前�
 	const app = await session(dir);
 	await app.command("verify", "add true");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 
 	// 他の拡張の続行は、Pi が退けることがある (続けられる文脈が無いとき)。そのときはこの境界が最後になる。
 	await app.emit("agent_start");
 	writeFileSync(join(dir, "a.txt"), "three\n");
 	assert.equal(await app.emit("agent_before_settle", { ...boundary, continue: true }), undefined);
 	await app.emit("agent_settled", { aborted: false });
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(確かめないままタスクが終わった/);
-	assert.match(app.notices.at(-1)!, /^検証: 未実行 \(確かめないままタスクが終わった/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(the task ended without a check/);
+	assert.match(app.notices.at(-1)!, /^verify: not run \(the task ended without a check/);
 });
 
 test("未実行と成功を status と /verify に出し、検証の前に中断されたタスクは未実行として知らせる", async () => {
@@ -226,27 +226,27 @@ test("未実行と成功を status と /verify に出し、検証の前に中断
 	const app = await session(dir);
 	assert.equal(app.statuses.get("verify"), undefined, "登録の無い project では何も出さない");
 	await app.command("verify", "add true");
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run/);
 
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 	await app.command("verify");
-	assert.match(app.notices.at(-1)!, /検証: 成功/);
+	assert.match(app.notices.at(-1)!, /verify: passed/);
 
 	app.notices.length = 0;
 	await task(app);
-	assert.equal(app.statuses.get("verify"), "検証: 成功", "変更の無いタスクは前の結果を変えない");
+	assert.equal(app.statuses.get("verify"), "verify: passed", "変更の無いタスクは前の結果を変えない");
 	assert.deepEqual(app.notices, [], "変更の無いタスクでは知らせない");
 
 	// Esc で止めたタスクには agent_before_settle が来ない。
 	await app.emit("agent_start");
 	writeFileSync(join(dir, "a.txt"), "three\n");
 	await app.emit("agent_settled", { aborted: true });
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(.*中断/);
-	assert.match(app.notices.at(-1)!, /^検証: 未実行 \(.*中断/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(.*interrupted/);
+	assert.match(app.notices.at(-1)!, /^verify: not run \(.*interrupted/);
 
 	const resumed = await session(dir);
-	assert.match(resumed.statuses.get("verify")!, /^検証: 未実行/, "結果はセッションをまたがない");
+	assert.match(resumed.statuses.get("verify")!, /^verify: not run/, "結果はセッションをまたがない");
 });
 
 test("合格は確かめた時点のファイル状態に結び付き、後の変更で無効になる。commit では無効にならない", async () => {
@@ -254,24 +254,24 @@ test("合格は確かめた時点のファイル状態に結び付き、後の�
 	const app = await session(dir);
 	await app.command("verify", "add true");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 
 	git(dir, "commit", "-qam", "two");
 	await app.command("verify");
-	assert.match(app.notices.at(-1)!, /検証: 成功/);
+	assert.match(app.notices.at(-1)!, /verify: passed/);
 
 	writeFileSync(join(dir, "a.txt"), "by hand\n");
 	await app.command("verify");
-	assert.match(app.notices.at(-1)!, /検証: 未実行 \(.*後にファイルが変わった/);
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行/);
+	assert.match(app.notices.at(-1)!, /verify: not run \(.*files changed after the check/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run/);
 
 	// タスクの外で変わった分は、次のタスクが何も変えなくても合格に戻さない。
 	writeFileSync(join(dir, "a.txt"), "two\n");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "three\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 	writeFileSync(join(dir, "a.txt"), "by hand again\n");
 	await task(app);
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run/);
 });
 
 test("自動修正へ戻すのは上限まで。モデルが何も変えなければ走らせ直さない", async () => {
@@ -287,15 +287,15 @@ test("自動修正へ戻すのは上限まで。モデルが何も変えなけ�
 	assert.equal(lines(mark).length, 3);
 	assert.match(boundaries[0]!.entries![0]!.content, /1\/2/, "何回目の差し戻しかをモデルに伝える");
 	assert.equal(app.notices.length, 1);
-	assert.match(app.notices[0]!, /^検証: 失敗 \(.*上限 2 回/);
-	assert.match(app.statuses.get("verify")!, /^検証: 失敗/);
+	assert.match(app.notices[0]!, /^verify: failed \(.*limit of 2 automatic fixes/);
+	assert.match(app.statuses.get("verify")!, /^verify: failed/);
 
 	const idle = await task(app, (round) => {
 		if (round === 0) writeFileSync(join(dir, "a.txt"), "next task\n");
 	});
 	assert.deepEqual(idle.map((result) => result?.continue), [true, undefined], "差し戻しても何も変わらなければそこで終える");
 	assert.equal(lines(mark).length, 4, "同じファイル状態を 2 度は確かめない");
-	assert.match(app.statuses.get("verify")!, /^検証: 失敗/);
+	assert.match(app.statuses.get("verify")!, /^verify: failed/);
 });
 
 test("エラーで終わったタスクは確かめるが、モデルへは戻さない", async () => {
@@ -306,7 +306,7 @@ test("エラーで終わったタスクは確かめるが、モデルへは戻�
 	writeFileSync(join(dir, "a.txt"), "two\n");
 	assert.equal(await app.emit("agent_before_settle", { ...boundary, outcome: "error" }), undefined);
 	await app.emit("agent_settled", { aborted: false });
-	assert.match(app.statuses.get("verify")!, /^検証: 失敗/);
+	assert.match(app.statuses.get("verify")!, /^verify: failed/);
 });
 
 test("timeout を過ぎたコマンドは子孫ごと止めて失敗にする", async () => {
@@ -323,7 +323,7 @@ test("timeout を過ぎたコマンドは子孫ごと止めて失敗にする", 
 		});
 		assert.ok(Date.now() - started < 10_000);
 		assert.match(boundaries[0]!.entries![0]!.content, /timeout/);
-		assert.match(app.statuses.get("verify")!, /^検証: 失敗 \(.*timeout/);
+		assert.match(app.statuses.get("verify")!, /^verify: failed \(.*timeout/);
 		await until(() => !alive(Number(readFileSync(pidFile, "utf8"))));
 	} finally {
 		limits.timeoutMs = previous;
@@ -345,16 +345,16 @@ for (const [name, cancel] of [
 		writeFileSync(join(dir, "a.txt"), "two\n");
 		const started = Date.now();
 		const pending = app.emit("agent_before_settle", boundary);
-		await until(() => /実行中.*sleep 30/.test(app.statuses.get("verify") ?? ""));
+		await until(() => /running.*sleep 30/.test(app.statuses.get("verify") ?? ""));
 		await cancel(app);
 		assert.equal(await pending, undefined);
 		assert.ok(Date.now() - started < 10_000);
 		assert.deepEqual(lines(mark), [], "止めた後のコマンドは走らせない");
 		assert.equal(terminal.get(app)!.size, 0, "端末の入力を聞くのは走っている間だけ");
-		assert.match(app.statuses.get("verify")!, /^検証: 中断/, "「実行中」の表示を残さない");
+		assert.match(app.statuses.get("verify")!, /^verify: interrupted/, "「実行中」の表示を残さない");
 		await app.emit("agent_settled", { aborted: name === "Esc" });
-		assert.match(app.statuses.get("verify")!, /^検証: 中断/);
-		assert.match(app.notices.at(-1)!, /^検証: 中断/);
+		assert.match(app.statuses.get("verify")!, /^verify: interrupted/);
+		assert.match(app.notices.at(-1)!, /^verify: interrupted/);
 	});
 }
 
@@ -368,8 +368,8 @@ for (const [name, command] of [
 		await app.command("verify", `add ${command}`);
 		const boundaries = await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
 		assert.deepEqual(boundaries, [undefined], "当てにならない結果でモデルへ戻さない");
-		assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(検証中にファイルが変わった/);
-		assert.match(app.notices.at(-1)!, /^検証: 未実行 \(検証中にファイルが変わった/);
+		assert.match(app.statuses.get("verify")!, /^verify: not run \(files changed during the check/);
+		assert.match(app.notices.at(-1)!, /^verify: not run \(files changed during the check/);
 	});
 }
 
@@ -381,7 +381,7 @@ test("git が無視しているファイルは、検証中に変わっても結�
 	const app = await session(dir);
 	await app.command("verify", "add mkdir -p build && date +%N > build/out");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 });
 
 test("登録を変えたら、前の成功も失敗も今の登録の結果として残さない", async () => {
@@ -389,20 +389,20 @@ test("登録を変えたら、前の成功も失敗も今の登録の結果と�
 	const app = await session(dir);
 	await app.command("verify", "add true");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 
 	await app.command("verify", "add false");
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(確かめた後に登録が変わった/, "走らせていないコマンドがあるのに成功とは言わない");
-	assert.match(app.notices.at(-1)!, /^検証: 未実行 \(確かめた後に登録が変わった/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(registration changed after the check/, "走らせていないコマンドがあるのに成功とは言わない");
+	assert.match(app.notices.at(-1)!, /^verify: not run \(registration changed after the check/);
 	await task(app);
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行/, "変更の無いタスクの後も成功に戻さない");
+	assert.match(app.statuses.get("verify")!, /^verify: not run/, "変更の無いタスクの後も成功に戻さない");
 
 	await task(app, (round) => {
 		if (round === 0) writeFileSync(join(dir, "a.txt"), "three\n");
 	});
-	assert.match(app.statuses.get("verify")!, /^検証: 失敗 \(false/);
+	assert.match(app.statuses.get("verify")!, /^verify: failed \(false/);
 	await app.command("verify", "remove 2");
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(確かめた後に登録が変わった/, "外したコマンドの失敗を残さない");
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(registration changed after the check/, "外したコマンドの失敗を残さない");
 });
 
 test("別のセッションが登録を変えたときも、前の結果を残さず、同じファイル状態でも確かめ直す", async () => {
@@ -421,20 +421,20 @@ test("別のセッションが登録を変えたときも、前の結果を残�
 	});
 	assert.deepEqual(boundaries.map((result) => result?.continue), [true, undefined]);
 	assert.deepEqual(lines(mark), ["ran"], "モデルが何も変えていなくても、登録が変わっていれば走らせる");
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 
 	await other.command("verify", "add false");
 	await app.command("verify");
-	assert.match(app.notices.at(-1)!, /^検証: 未実行 \(確かめた後に登録が変わった/);
+	assert.match(app.notices.at(-1)!, /^verify: not run \(registration changed after the check/);
 
 	// 境界の後、agent_settled までの間に変わった分。
 	await other.command("verify", "remove 2");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "three\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 	await app.emit("agent_start");
 	await other.command("verify", "add false");
 	await app.emit("agent_settled", { aborted: false });
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(確かめた後に登録が変わった/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(registration changed after the check/);
 });
 
 test("verify.json の projects が配列なら知らない形として扱い、登録したことにしない", async () => {
@@ -575,8 +575,8 @@ test("git からファイル状態を取れなければ、走らせずに未実�
 		writeFileSync(join(dir, ".git", "index"), "broken");
 	});
 	assert.deepEqual(lines(mark), []);
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(git から/);
-	assert.match(app.notices.at(-1)!, /^検証: 未実行 \(git から/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(could not get the file state from git/);
+	assert.match(app.notices.at(-1)!, /^verify: not run \(could not get the file state from git/);
 });
 
 test("登録があるのに git を拾えなければ、リポジトリの外とは別の文面でセッションに 1 度だけ知らせ、検証は走らせない", async () => {
@@ -590,9 +590,9 @@ test("登録があるのに git を拾えなければ、リポジトリの外と
 
 	await app.emit("session_start");
 	assert.equal(app.notices.length, 1);
-	assert.match(app.notices[0]!, /git が見つからない/);
-	assert.doesNotMatch(app.notices[0]!, /リポジトリの外/);
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(git が見つからない/);
+	assert.match(app.notices[0]!, /git not found/);
+	assert.doesNotMatch(app.notices[0]!, /outside a git repository/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(git not found/);
 
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "three\n"));
@@ -600,19 +600,19 @@ test("登録があるのに git を拾えなければ、リポジトリの外と
 	assert.equal(app.notices.length, 1, "タスクのたびには知らせない");
 
 	await app.command("verify");
-	assert.match(app.notices.at(-1)!, /git が見つからない/);
-	assert.doesNotMatch(app.notices.at(-1)!, /リポジトリの外/);
+	assert.match(app.notices.at(-1)!, /git not found/);
+	assert.doesNotMatch(app.notices.at(-1)!, /outside a git repository/);
 	await app.command("verify", "add true");
-	assert.match(app.notices.at(-1)!, /git が見つからない/);
+	assert.match(app.notices.at(-1)!, /git not found/);
 
 	await app.emit("session_start");
-	assert.equal(app.notices.filter((notice) => /^検証: 未実行 \(git が見つからない/.test(notice)).length, 2, "次のセッションではもう 1 度知らせる");
+	assert.equal(app.notices.filter((notice) => /^verify: not run \(git not found/.test(notice)).length, 2, "次のセッションではもう 1 度知らせる");
 
 	// git が拾えるようになったら、拾えなかった間の表示を残さない。
 	off();
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "four\n"));
 	assert.deepEqual(lines(mark), ["ran"]);
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 });
 
 test("登録が 1 つも無ければ、git を拾えなくても何も出さない", async () => {
@@ -636,9 +636,9 @@ test("同じインスタンスで session_start が来たら、前のセッシ�
 	const app = await session(dir);
 	await app.command("verify", "add true");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 	await app.emit("session_start");
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(このセッション/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(not checked yet in this session/);
 });
 
 test("走っている間に /verify を打っても、実行中の表示と結果を書き換えない", async () => {
@@ -648,19 +648,19 @@ test("走っている間に /verify を打っても、実行中の表示と結�
 	await app.command("verify", `add until [ -e ${gate} ]; do sleep 0.02; done`);
 	writeFileSync(gate, "");
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 	rmSync(gate);
 
 	await app.emit("agent_start");
 	writeFileSync(join(dir, "a.txt"), "three\n");
 	const pending = app.emit("agent_before_settle", boundary);
-	await until(() => /実行中/.test(app.statuses.get("verify") ?? ""));
+	await until(() => /running/.test(app.statuses.get("verify") ?? ""));
 	await app.command("verify");
-	assert.match(app.statuses.get("verify")!, /^検証: 実行中/);
+	assert.match(app.statuses.get("verify")!, /^verify: running/);
 	writeFileSync(gate, "");
 	await pending;
 	await app.emit("agent_settled", { aborted: false });
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 });
 
 test("止めた検証がファイルを変えていても、中断として残す", async () => {
@@ -673,9 +673,9 @@ test("止めた検証がファイルを変えていても、中断として残�
 	await until(() => readFileSync(join(dir, "a.txt"), "utf8").includes("generated"));
 	await app.command("verify", "stop");
 	await pending;
-	assert.match(app.statuses.get("verify")!, /^検証: 中断/);
+	assert.match(app.statuses.get("verify")!, /^verify: interrupted/);
 	await app.emit("agent_settled", { aborted: false });
-	assert.match(app.statuses.get("verify")!, /^検証: 中断/);
+	assert.match(app.statuses.get("verify")!, /^verify: interrupted/);
 });
 
 test("セッションの終わりは、SIGTERM を無視する検証が止まり切るまで待つ", async () => {
@@ -727,11 +727,11 @@ test("guard が居れば、検証コマンドは guard が準備した形で走�
 	await task(app, () => writeFileSync(join(dir, "a.txt"), "two\n"));
 	assert.deepEqual(asked, [{ command: `echo ran >> ${mark}`, cwd: dir }]);
 	assert.deepEqual(lines(mark), ["wrapped", "ran"], "guard が返した command と env で起こす");
-	assert.equal(app.statuses.get("verify"), "検証: 成功");
+	assert.equal(app.statuses.get("verify"), "verify: passed");
 
 	refuse = true;
 	const boundaries = await task(app, () => writeFileSync(join(dir, "a.txt"), "three\n"));
 	assert.deepEqual(lines(mark), ["wrapped", "ran"], "断られたコマンドを sandbox なしで走らせない");
-	assert.match(app.statuses.get("verify")!, /^検証: 未実行 \(.*OS sandbox is unavailable/);
+	assert.match(app.statuses.get("verify")!, /^verify: not run \(.*OS sandbox is unavailable/);
 	assert.deepEqual(boundaries, [undefined], "コードの失敗ではないので、モデルへは戻さない");
 });

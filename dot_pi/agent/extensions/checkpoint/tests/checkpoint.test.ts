@@ -85,9 +85,9 @@ test("一覧は Pi の write / edit が書いたままのファイルと、そ�
 	writeFileSync(join(dir, "b.txt"), "pi, then someone else\n");
 	writeFileSync(join(dir, "c.txt"), "changed by a shell command or a person\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+a\.txt\s+Pi が書いたまま/);
-	assert.match(app.lastNotice(), /M\s+b\.txt\s+Pi と別の変更が混じっている/);
-	assert.match(app.lastNotice(), /M\s+c\.txt\s+Pi の write \/ edit 以外の変更/);
+	assert.match(app.lastNotice(), /M\s+a\.txt\s+unchanged since Pi wrote it/);
+	assert.match(app.lastNotice(), /M\s+b\.txt\s+Pi's changes mixed with other changes/);
+	assert.match(app.lastNotice(), /M\s+c\.txt\s+changed by something other than Pi's write \/ edit/);
 });
 
 test("/checkpoint diff は基準と今の差分を見せる", async () => {
@@ -131,7 +131,7 @@ test("Pi が書いた後に誰かが変えたファイルは確認で止まり�
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\nand a person\n");
 	assert.equal(app.confirmations.length, 1);
 	assert.match(app.confirmations[0], /a\.txt/);
-	assert.match(app.confirmations[0], /Pi と別の変更が混じっている/);
+	assert.match(app.confirmations[0], /Pi's changes mixed with other changes/);
 	app.approve(true);
 	await app.command("checkpoint", "restore a.txt");
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "a\n");
@@ -147,7 +147,7 @@ test("確認を待つ間に中身が変わったら、承認されていても�
 	};
 	await app.command("checkpoint", "restore a.txt");
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "written while the dialog was open\n");
-	assert.match(app.lastNotice(), /確認の間に中身が変わった/);
+	assert.match(app.lastNotice(), /changed while waiting for confirmation/);
 });
 
 test("Pi が書く前に誰かが変えていたファイルも、Pi が上書きした後で確認に回る", async () => {
@@ -168,7 +168,7 @@ test("shell や人が変えたファイルは誰の変更か分からないの�
 	app.approve(false);
 	await app.command("checkpoint", "restore a.txt");
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "sed -i, a formatter, or a person\n");
-	assert.match(app.confirmations[0], /Pi の write \/ edit 以外の変更/);
+	assert.match(app.confirmations[0], /changed by something other than Pi's write \/ edit/);
 });
 
 test("確認できないとき (UI なし)、Pi が動いている間、一覧に無いパスは戻さない", async () => {
@@ -191,7 +191,7 @@ test("確認できないとき (UI なし)、Pi が動いている間、一覧�
 
 	for (const path of ["", "nope.txt", "../outside.txt", "/etc/hostname"]) {
 		await app.command("checkpoint", `restore ${path}`);
-		assert.match(app.lastNotice(), /復元候補に無い/, path);
+		assert.match(app.lastNotice(), /is not a restore candidate/, path);
 	}
 });
 
@@ -221,7 +221,7 @@ test("symlink は辿らずにリンクそのものを 1 つのファイルとし
 	writeFileSync(join(dir, "link"), "written through the link\n");
 	await app.emit("tool_result", { toolName: "write", toolCallId: "c", input: { path: "link" }, isError: false });
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+a\.txt\s+Pi の write \/ edit 以外の変更/);
+	assert.match(app.lastNotice(), /M\s+a\.txt\s+changed by something other than Pi's write \/ edit/);
 	assert.doesNotMatch(app.lastNotice(), /\slink\s/);
 
 	// リンクが普通のファイルに置き換わったら、リンクに戻す。指す先は触らない。
@@ -249,7 +249,7 @@ test("基準はセッションに残り、reload しても取り直さない。P
 	reloaded.approve(false);
 	await reloaded.command("checkpoint", "restore a.txt");
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
-	assert.match(reloaded.confirmations[0], /Pi の write \/ edit 以外の変更/);
+	assert.match(reloaded.confirmations[0], /changed by something other than Pi's write \/ edit/);
 });
 
 test("/checkpoint new は今の状態を新しい基準にする", async () => {
@@ -258,7 +258,7 @@ test("/checkpoint new は今の状態を新しい基準にする", async () => {
 	await app.piWrites("a.txt", "first task\n");
 	await app.command("checkpoint", "new");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /変わったファイルは無い/);
+	assert.match(app.lastNotice(), /no files changed/);
 	await app.piWrites("a.txt", "second task\n");
 	await app.command("checkpoint", "restore a.txt");
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "first task\n");
@@ -278,7 +278,7 @@ test("基準を取っても戻しても、commit・stash・ref・index は増え
 	writeFileSync(join(dir, "sub/b.txt"), "pi\n");
 	await app.emit("tool_result", { toolName: "edit", toolCallId: "c", input: { path: "b.txt" }, isError: false });
 	await app.command("checkpoint");
-	assert.match(app.notices.at(-1)!, /M\s+sub\/b\.txt\s+Pi が書いたまま/);
+	assert.match(app.notices.at(-1)!, /M\s+sub\/b\.txt\s+unchanged since Pi wrote it/);
 	await app.command("checkpoint", "new");
 	writeFileSync(join(dir, "a.txt"), "changed\n");
 	app.approve(true);
@@ -292,7 +292,7 @@ test("git の作業ツリーの外では何もせず、そう伝える", async (
 	const app = await start(dir);
 	await app.piWrites("a.txt", "pi\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /基準が無い/);
+	assert.match(app.lastNotice(), /no baseline/);
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
 });
 
@@ -315,7 +315,7 @@ async function listAndRestore(dir: string, refused = false) {
 	if (refused) {
 		for (const args of ["", "restore a.txt"]) {
 			await app.command("checkpoint", args);
-			assert.match(app.lastNotice(), /基準を取らない.*git 2\.56 以上が要る/, args);
+			assert.match(app.lastNotice(), /not taking a baseline.*need git 2\.56 or later/, args);
 		}
 		assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
 		return;
@@ -372,10 +372,10 @@ test("版の門が断るのは、設定に書いた hook を止める鍵を知�
 		for (const [output, shown] of [
 			["git version 2.54.0 (Apple Git-157)\n", /git 2\.54\.0 /],
 			["git version 2.55.1\n", /git 2\.55\.1 /],
-			["not a version\n", /版を読めない/],
+			["not a version\n", /cannot read the git version/],
 		] as const) {
 			assert.match(hookGate(output) ?? "", shown, output);
-			assert.match(hookGate(output) ?? "", /git 2\.56 以上が要る/, output);
+			assert.match(hookGate(output) ?? "", /need git 2\.56 or later/, output);
 		}
 	}));
 
@@ -392,11 +392,11 @@ test("設定に書いた hook を止められない版の git では基準を取
 		await app.emit("session_start", { reason: "startup" });
 		for (const prompt of ["do it", "again"]) await app.emit("before_agent_start", { prompt });
 		assert.deepEqual(app.notices, []);
-		assert.match(app.statuses.get("checkpoint") ?? "", /基準を取らない.*git 2\.56 以上が要る/);
+		assert.match(app.statuses.get("checkpoint") ?? "", /not taking a baseline.*need git 2\.56 or later/);
 		// 人が打ったコマンドには、毎回理由を答える。
 		for (const args of ["", "new", "diff", "restore untracked.txt"]) {
 			await app.command("checkpoint", args);
-			assert.match(app.notices.at(-1)!, /基準を取らない.*git 2\.56 以上が要る/, args);
+			assert.match(app.notices.at(-1)!, /not taking a baseline.*need git 2\.56 or later/, args);
 		}
 		assert.throws(() => git(dir, "cat-file", "-e", blob), "基準を取る git add を起こしていない");
 	} finally {
@@ -406,7 +406,7 @@ test("設定に書いた hook を止められない版の git では基準を取
 	await app.emit("before_agent_start", { prompt: "after an upgrade" });
 	assert.equal(app.statuses.get("checkpoint"), undefined);
 	await app.command("checkpoint");
-	assert.match(app.notices.at(-1)!, /変わったファイルは無い/);
+	assert.match(app.notices.at(-1)!, /no files changed/);
 });
 
 test("基準があっても、git が設定に書いた hook を止められない版なら、一覧も復元もしない。セッションに残った基準も使わない", async () => {
@@ -418,7 +418,7 @@ test("基準があっても、git が設定に書いた hook を止められな�
 		// セッションの途中で git が変わった。
 		for (const args of ["", "diff", "restore a.txt"]) {
 			await app.command("checkpoint", args);
-			assert.match(app.lastNotice(), /基準を取らない.*git 2\.56 以上が要る/, args);
+			assert.match(app.lastNotice(), /not taking a baseline.*need git 2\.56 or later/, args);
 		}
 		// 門が入る前の checkpoint が残した基準を、再開で拾った。
 		const resumed = extensionHost();
@@ -426,10 +426,10 @@ test("基準があっても、git が設定に書いた hook を止められな�
 		resumed.replaceSession(app.manager);
 		checkpoint(resumed.pi);
 		await resumed.emit("session_start", { reason: "resume" });
-		assert.match(resumed.statuses.get("checkpoint") ?? "", /git 2\.56 以上が要る/);
+		assert.match(resumed.statuses.get("checkpoint") ?? "", /need git 2\.56 or later/);
 		await resumed.emit("tool_call", { toolName: "write", toolCallId: "c", input: { path: "a.txt" } });
 		await resumed.command("checkpoint", "restore a.txt");
-		assert.match(resumed.notices.at(-1)!, /基準を取らない/);
+		assert.match(resumed.notices.at(-1)!, /not taking a baseline/);
 		assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
 	} finally {
 		HOOKS_UNSTOPPABLE.splice(0);
@@ -456,7 +456,7 @@ for (const [name, plant] of [
 		for (const args of ["", "diff a.txt", "restore a.txt"]) await app.command("checkpoint", args).catch(() => {});
 		assert.equal(existsSync(mark), false, "remote の設定からコマンドが起きていない");
 		// 欠けたまま git restore を打つと、git は a.txt を消してから失敗する。
-		assert.match(app.lastNotice(), /a\.txt の基準の中身を git から読めないので戻さない/);
+		assert.match(app.lastNotice(), /not restoring a\.txt because its baseline content cannot be read from git/);
 		assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
 	});
 }
@@ -475,7 +475,7 @@ test("リポジトリの設定に仕込まれた filter は走らせず、その
 	app.approve(true);
 	await app.command("checkpoint", "restore a.txt");
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
-	assert.match(app.lastNotice(), /filter「x=y」/);
+	assert.match(app.lastNotice(), /filter "x=y"/);
 	await app.command("checkpoint", "restore b.md");
 	assert.equal(readFileSync(join(dir, "b.md"), "utf8"), "b\n");
 	// 基準に無かったファイルは消すだけで、基準の中身を書き出さないので戻せる。
@@ -525,7 +525,7 @@ for (const scope of ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"] as const) {
 			app.approve(true);
 			await app.command("checkpoint", "restore a.txt");
 			assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "pi\n");
-			assert.match(app.lastNotice(), /filter「x」/);
+			assert.match(app.lastNotice(), /filter "x"/);
 			await app.command("checkpoint", "restore b.md");
 			assert.equal(readFileSync(join(dir, "b.md"), "utf8"), "b\n");
 			assert.deepEqual(readdirSync(marks), []);
@@ -554,7 +554,7 @@ test("git が index に入れられないものが 1 つあっても、残りの
 	assert.deepEqual(app.notices, []);
 	await app.piWrites("a.txt", "pi\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+a\.txt\s+Pi が書いたまま/);
+	assert.match(app.lastNotice(), /M\s+a\.txt\s+unchanged since Pi wrote it/);
 	await app.command("checkpoint", "restore a.txt");
 	assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "a\n");
 });
@@ -572,11 +572,11 @@ test("戻すと名前の出ていない別のパスが消えるときは、戻�
 
 	await app.command("checkpoint", "restore d/x.txt");
 	assert.equal(readFileSync(join(dir, "d"), "utf8"), "someone's new file\n");
-	assert.match(app.lastNotice(), /「d」/);
+	assert.match(app.lastNotice(), /"d"/);
 
 	await app.command("checkpoint", "restore e");
 	assert.equal(readFileSync(join(dir, "e/ignored.log"), "utf8"), "not in the list\n");
-	assert.match(app.lastNotice(), /「e」/);
+	assert.match(app.lastNotice(), /"e"/);
 
 	// 邪魔なものを先に片付ければ戻せる。
 	await app.command("checkpoint", "restore d");
@@ -604,8 +604,8 @@ test("skip-worktree / assume-unchanged の付いたファイルの変更も一�
 	await app.piWrites("b.txt", "pi\n");
 	await app.piWrites("c.txt", "pi\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+b\.txt\s+Pi が書いたまま/);
-	assert.match(app.lastNotice(), /M\s+c\.txt\s+Pi が書いたまま/);
+	assert.match(app.lastNotice(), /M\s+b\.txt\s+unchanged since Pi wrote it/);
+	assert.match(app.lastNotice(), /M\s+c\.txt\s+unchanged since Pi wrote it/);
 	await app.command("checkpoint", "restore b.txt");
 	assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "b\n");
 	assert.equal(git(dir, "ls-files", "-v"), "H a.txt\nS b.txt\nh c.txt\n");
@@ -616,7 +616,7 @@ test("名前が .. で始まるファイルもリポジトリの中のファイ�
 	const app = await start(dir);
 	await app.piWrites("..foo", "pi\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /A\s+\.\.foo\s+Pi が書いたまま/);
+	assert.match(app.lastNotice(), /A\s+\.\.foo\s+unchanged since Pi wrote it/);
 });
 
 test("restore のパスは glob として解釈せず、その名前のファイルだけを戻す", async () => {
@@ -647,7 +647,7 @@ test("セッションに残った基準は、別のリポジトリ・消えた t
 	};
 	const moved = await resume(elsewhere.manager);
 	await moved.command("checkpoint");
-	assert.match(moved.notices.at(-1)!, /変わったファイルは無い/);
+	assert.match(moved.notices.at(-1)!, /no files changed/);
 
 	for (const tree of ["1".repeat(40), "HEAD"]) {
 		const fresh = extensionHost();
@@ -683,7 +683,7 @@ test("失敗した write / edit は Pi が書いた記録にしない", async ()
 	await app.emit("tool_result", { toolName: "edit", toolCallId: "c", input: { path: "a.txt" }, isError: true });
 	writeFileSync(join(dir, "a.txt"), "a person\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+a\.txt\s+Pi の write \/ edit 以外の変更/);
+	assert.match(app.lastNotice(), /M\s+a\.txt\s+changed by something other than Pi's write \/ edit/);
 });
 
 test("戻した後は Pi の記録を消す。同じ中身を誰かが書けば確認に回り、Pi が書き直せば Pi が書いたままになる", async () => {
@@ -703,7 +703,7 @@ test("戻した後は Pi の記録を消す。同じ中身を誰かが書けば�
 	await app.command("checkpoint", "restore b.txt");
 	await app.piWrites("b.txt", "pi again\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+b\.txt\s+Pi が書いたまま/);
+	assert.match(app.lastNotice(), /M\s+b\.txt\s+unchanged since Pi wrote it/);
 });
 
 test("戻す前の作業ツリーを tree に取り、知らせた id から戻す前の中身を読める", async () => {
@@ -722,7 +722,7 @@ test("/checkpoint diff は 200 行で切り、残りの行数を添える", asyn
 	await app.command("checkpoint", "diff");
 	const lines = app.lastNotice().split("\n");
 	assert.equal(lines.length, 201);
-	assert.match(lines[200], /残り \d+ 行/);
+	assert.match(lines[200], /\d+ more lines/);
 });
 
 test("一時ディレクトリに何も残さない", async () => {
@@ -749,8 +749,8 @@ test("Pi が書いた前後に誰かが実行ビットを変えたファイル�
 	chmodSync(join(dir, "before.sh"), 0o755);
 	await app.piWrites("before.sh", "echo pi\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+after\.sh\s+Pi と別の変更が混じっている/);
-	assert.match(app.lastNotice(), /M\s+before\.sh\s+Pi と別の変更が混じっている/);
+	assert.match(app.lastNotice(), /M\s+after\.sh\s+Pi's changes mixed with other changes/);
+	assert.match(app.lastNotice(), /M\s+before\.sh\s+Pi's changes mixed with other changes/);
 	app.approve(false);
 	await app.command("checkpoint", "restore after.sh");
 	await app.command("checkpoint", "restore before.sh");
@@ -770,17 +770,17 @@ test("追跡済みで .gitignore に当たるファイルの変更は、index �
 	git(dir, "update-index", "--assume-unchanged", "a.txt");
 	const app = await start(dir);
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /変わったファイルは無い/);
+	assert.match(app.lastNotice(), /no files changed/);
 	await app.piWrites("dist/out.js", "pi\n");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+dist\/out\.js\s+Pi が書いたまま/);
+	assert.match(app.lastNotice(), /M\s+dist\/out\.js\s+unchanged since Pi wrote it/);
 	await app.command("checkpoint", "restore dist/out.js");
 	assert.equal(readFileSync(join(dir, "dist/out.js"), "utf8"), "built\n");
 	assert.equal(git(dir, "ls-files", "-v"), "H .gitignore\nh a.txt\nS b.txt\nH dist/out.js\n");
 	// 基準を取った後で印を付けても、そこにあるファイルを「消えた」とは言わない。
 	git(dir, "update-index", "--skip-worktree", "dist/out.js");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /変わったファイルは無い/);
+	assert.match(app.lastNotice(), /no files changed/);
 });
 
 test("基準に無いファイルを戻す確認は、ファイルが消えることと、タスク前からあったかもしれないことを伝える", async () => {
@@ -789,18 +789,18 @@ test("基準に無いファイルを戻す確認は、ファイルが消える�
 	const app = await start(dir);
 	await app.piWrites(".gitignore", "");
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /A\s+secret\.env\s+Pi の write \/ edit 以外の変更/);
+	assert.match(app.lastNotice(), /A\s+secret\.env\s+changed by something other than Pi's write \/ edit/);
 	app.approve(false);
 	await app.command("checkpoint", "restore secret.env");
 	assert.equal(app.confirmations.length, 1);
-	assert.match(app.confirmations[0], /secret\.env を消す\?/);
-	assert.match(app.confirmations[0], /タスクの前からあった/);
+	assert.match(app.confirmations[0], /Delete secret\.env\?/);
+	assert.match(app.confirmations[0], /existed before the task/);
 	assert.equal(readFileSync(join(dir, "secret.env"), "utf8"), "here before the task, ignored\n");
 	// 基準にあるファイルの確認は、消すとは言わない。
 	writeFileSync(join(dir, "a.txt"), "a person\n");
 	await app.command("checkpoint", "restore a.txt");
-	assert.match(app.confirmations[1], /a\.txt を基準に戻す\?/);
-	assert.doesNotMatch(app.confirmations[1], /消す\?|タスクの前からあった/);
+	assert.match(app.confirmations[1], /Restore a\.txt to the baseline\?/);
+	assert.doesNotMatch(app.confirmations[1], /Delete|existed before the task/);
 });
 
 test("/checkpoint new が基準を取れなかったら、前の基準と Pi の記録を残して知らせる", async () => {
@@ -814,9 +814,9 @@ test("/checkpoint new が基準を取れなかったら、前の基準と Pi の
 	} finally {
 		process.env.PATH = saved;
 	}
-	assert.match(app.lastNotice(), /基準を取れなかった.*前の基準/s);
+	assert.match(app.lastNotice(), /could not take a baseline.*previous baseline/s);
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+a\.txt\s+Pi が書いたまま/);
+	assert.match(app.lastNotice(), /M\s+a\.txt\s+unchanged since Pi wrote it/);
 });
 
 test("名前の頭や末尾に空白があるファイルも、一覧に出た名前のまま diff と restore に渡せる", async () => {
@@ -860,7 +860,7 @@ test("確認を待つ間に symlink の指す先が変わったら、承認さ�
 	};
 	await app.command("checkpoint", "restore link");
 	assert.equal(readlinkSync(join(dir, "link")), "c.txt");
-	assert.match(app.lastNotice(), /確認の間に中身が変わった/);
+	assert.match(app.lastNotice(), /changed while waiting for confirmation/);
 });
 
 test("Pi が書く直前の中身を基準と比べられなかったファイルは、確認に回す", async () => {
@@ -876,7 +876,7 @@ test("Pi が書く直前の中身を基準と比べられなかったファイ�
 	writeFileSync(join(dir, "a.txt"), "pi\n");
 	await app.emit("tool_result", { toolName: "write", toolCallId: "c", input: { path: "a.txt" }, isError: false });
 	await app.command("checkpoint");
-	assert.match(app.lastNotice(), /M\s+a\.txt\s+Pi と別の変更が混じっている/);
+	assert.match(app.lastNotice(), /M\s+a\.txt\s+Pi's changes mixed with other changes/);
 });
 
 test("git を起動できないときは「作業ツリーの外」として黙らず、基準を取れなかったと知らせる", async () => {
@@ -892,7 +892,7 @@ test("git を起動できないときは「作業ツリーの外」として黙�
 	} finally {
 		process.env.PATH = saved;
 	}
-	assert.match(app.notices.at(-1) ?? "", /基準を取れなかった/);
+	assert.match(app.notices.at(-1) ?? "", /could not take a baseline/);
 });
 
 test("sandbox の中から書けない場所に git が無いことは、再開でも依頼のたびでも、1 セッションに 1 度だけ知らせる", async () => {
@@ -908,7 +908,7 @@ test("sandbox の中から書けない場所に git が無いことは、再開�
 		await app.emit("session_start", { reason: manager ? "resume" : "startup" });
 		return app;
 	};
-	const told = (app: { notices: string[] }) => app.notices.filter((notice) => /sandbox の中から書けない場所の PATH に git が無い/.test(notice)).length;
+	const told = (app: { notices: string[] }) => app.notices.filter((notice) => /no git on the PATH entries the sandbox cannot write to/.test(notice)).length;
 
 	// 基準の残ったセッションの再開では、残った基準を確かめるところで分かる。
 	const resumed = await withoutGit(earlier.manager);

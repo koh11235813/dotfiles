@@ -55,7 +55,7 @@ test("monitorのjobが走っている間は戻さず、止めるか終わるの�
 		assert.match(app.notices.at(-1)!, new RegExp(`job.*${job.id}`));
 		assert.match(app.notices.at(-1)!, /\/jobs stop/);
 		// /jobs stop が効かない job (シグナルの届かないもの) は running のまま残る。そのときの出口も伝える。
-		assert.match(app.notices.at(-1)!, /止めても running のまま.*Pi を起動し直す/);
+		assert.match(app.notices.at(-1)!, /stays running after being stopped.*restart Pi/);
 		// 一覧と差分は読むだけなので、job が走っていても見せる。
 		await app.command("checkpoint");
 		assert.match(app.notices.at(-1)!, /M\s+a\.txt/);
@@ -102,7 +102,7 @@ test("確認を待つ間にPiが動き出したりjobが起きたりしたら、
 		meanwhile = async () => app.idle(false);
 		await app.command("checkpoint", "restore a.txt");
 		assert.equal(readFileSync(join(root, "a.txt"), "utf8"), "shell\n");
-		assert.match(app.notices.at(-1)!, /Pi が動いている間は戻さない/);
+		assert.match(app.notices.at(-1)!, /not restoring while Pi is running/);
 
 		meanwhile = async () => {};
 		app.idle(true);
@@ -145,7 +145,7 @@ test("PATHの要素がsandboxの中から書ける場所にあっても、そこ
 		process.env.PATH = venv;
 		await app.command("checkpoint", "new");
 		assert.equal(existsSync(join(outside, "mark")), false);
-		assert.match(app.notices.at(-1)!, /基準を取れなかった.*前の基準をそのまま使う/);
+		assert.match(app.notices.at(-1)!, /could not take a baseline.*Keeping the previous baseline/);
 	} finally {
 		process.env.PATH = path;
 		await app.emit("session_shutdown", { reason: "quit" });

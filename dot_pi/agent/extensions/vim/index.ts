@@ -138,7 +138,7 @@ class VimEditor extends CustomEditor {
 			this.#retryRestore();
 		}).catch((error: unknown) => {
 			try {
-				if (this.#isActive()) this.#host.warn(`vim: 送信後の下書き復元に失敗しました: ${String(error)}`);
+				if (this.#isActive()) this.#host.warn(`vim: failed to restore the draft after sending: ${String(error)}`);
 			} catch {
 				// 古い ctx への通知が失敗しても、未処理の Promise rejection を作らない。
 			}
@@ -173,7 +173,7 @@ class VimEditor extends CustomEditor {
 			const text = this.getExpandedText();
 			if (this.#draft !== undefined) {
 				if (text.trim()) {
-					this.#host.warn("vim: 下書きは保存済みです。入力欄を空にしてから Ctrl+S で復元してください。");
+					this.#host.warn("vim: a draft is already saved. Clear the input, then press Ctrl+S to restore it.");
 					return;
 				}
 				this.#restoreDraft(this.#draft);
@@ -242,7 +242,7 @@ class VimEditor extends CustomEditor {
 
 	#apply(outcome: Outcome): void {
 		if (outcome.refused) {
-			this.#host.warn("vim: 貼り付けマーカーがある間は削除できません。Ctrl+G で外部エディタを開いて編集してください。");
+			this.#host.warn("vim: cannot delete while a paste marker is present. Press Ctrl+G to open the external editor and edit there.");
 			return;
 		}
 		// vim の 1 コマンドが Pi の undo 1 回になるよう、編集は setText か insertTextAtCursor の 1 回だけ。
