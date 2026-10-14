@@ -126,7 +126,7 @@ test("held なら watcher を起こさず、status に出す", async () => {
 	await until(() => app.statuses.get("agmsg") !== undefined);
 	await pause(100);
 
-	assert.equal(app.statuses.get("agmsg"), "agmsg: pi は別のセッション (other-session.4242) が名乗っている。Notify は受けない");
+	assert.equal(app.statuses.get("agmsg"), "agmsg: pi is claimed by another session (other-session.4242). Notify is off");
 	assert.deepEqual(fake.calls("watch"), []);
 	assert.deepEqual(events, []);
 });
@@ -136,7 +136,7 @@ test("held 以外で claim が通らなかったときは、held とは別の文
 	const { app } = await session(fake);
 	await until(() => app.statuses.get("agmsg") !== undefined);
 
-	assert.equal(app.statuses.get("agmsg"), "agmsg: pi を名乗れなかった (status=unverified team=dotfiles reason=lock_unreadable)。Notify は受けない");
+	assert.equal(app.statuses.get("agmsg"), "agmsg: could not claim pi (status=unverified team=dotfiles reason=lock_unreadable). Notify is off");
 	assert.deepEqual(fake.calls("watch"), []);
 });
 
@@ -145,7 +145,7 @@ test("登録された名前が複数あれば名乗らない", async () => {
 	const { app } = await session(fake);
 	await until(() => app.statuses.get("agmsg") !== undefined);
 
-	assert.equal(app.statuses.get("agmsg"), "agmsg: この project に Pi の登録が複数ある (pi, reviewer) ので名乗らない");
+	assert.equal(app.statuses.get("agmsg"), "agmsg: not claiming: this project has more than one Pi registration (pi, reviewer)");
 	assert.deepEqual(fake.calls("claim"), []);
 });
 
@@ -155,7 +155,7 @@ test("未読が来ると、件数だけの received が wake つきで出る。�
 	const { events } = await session(fake);
 	await until(() => events.length > 0);
 
-	assert.deepEqual(events, [{ kind: "received", source: "agmsg", id: "1111", summary: "未読の Message が 2 件ある", wake: true }]);
+	assert.deepEqual(events, [{ kind: "received", source: "agmsg", id: "1111", summary: "unread Messages: 2", wake: true }]);
 
 	// 偽の watch-once.sh は同じ max_id ですぐ返り続ける。起こし直すのは repeatMs を待ってから。
 	await pause(300);
@@ -165,7 +165,7 @@ test("未読が来ると、件数だけの received が wake つきで出る。�
 
 	fake.pending(3, "2222");
 	await until(() => events.length === 2);
-	assert.deepEqual(events[1], { kind: "received", source: "agmsg", id: "2222", summary: "未読の Message が 3 件ある", wake: true });
+	assert.deepEqual(events[1], { kind: "received", source: "agmsg", id: "2222", summary: "unread Messages: 3", wake: true });
 	assert.ok(!JSON.stringify(events).includes("secret"));
 });
 
@@ -174,10 +174,10 @@ test("watch-once.sh が失敗したら起こし直さず、status に出す", as
 	writeFileSync(join(fake.root, "watch.out"), "");
 	writeFileSync(join(fake.root, "watch.code"), "1");
 	const { app } = await session(fake);
-	await until(() => app.statuses.get("agmsg")?.includes("止まった") === true);
+	await until(() => app.statuses.get("agmsg")?.includes("stopped") === true);
 	await pause(100);
 
-	assert.equal(app.statuses.get("agmsg"), "agmsg: 未読の監視が止まった (exit 1)");
+	assert.equal(app.statuses.get("agmsg"), "agmsg: stopped watching for unread Messages (exit 1)");
 	assert.equal(fake.calls("watch").length, 1);
 });
 
@@ -197,10 +197,10 @@ test("終了コード 2 でも status=timeout が無ければ (構文エラー�
 	writeFileSync(join(fake.root, "watch.out"), "");
 	writeFileSync(join(fake.root, "watch.code"), "2");
 	const { app } = await session(fake);
-	await until(() => app.statuses.get("agmsg")?.includes("止まった") === true);
+	await until(() => app.statuses.get("agmsg")?.includes("stopped") === true);
 	await pause(limits.repeatMs + 300);
 
-	assert.equal(app.statuses.get("agmsg"), "agmsg: 未読の監視が止まった (exit 2)");
+	assert.equal(app.statuses.get("agmsg"), "agmsg: stopped watching for unread Messages (exit 2)");
 	assert.equal(fake.calls("watch").length, 1);
 });
 
@@ -214,9 +214,9 @@ test("watch-once.sh が自分の timeout を過ぎても返らなければ、子
 	await until(() => fake.calls("child").length > 0);
 	const pids = [watcherPid(fake.calls("watch")[0]), Number(fake.calls("child")[0].split(" ")[1])];
 	assert.ok(pids.every(alive));
-	await until(() => app.statuses.get("agmsg")?.includes("止まった") === true);
+	await until(() => app.statuses.get("agmsg")?.includes("stopped") === true);
 
-	assert.equal(app.statuses.get("agmsg"), "agmsg: 未読の監視が止まった (exit -1)");
+	assert.equal(app.statuses.get("agmsg"), "agmsg: stopped watching for unread Messages (exit -1)");
 	await until(() => !pids.some(alive));
 	assert.equal(fake.calls("watch").length, 1);
 });
@@ -229,7 +229,7 @@ test("claim が返らなければ打ち切って、status に出す", async (t) 
 	const { app } = await session(fake);
 	await until(() => app.statuses.get("agmsg") !== undefined);
 
-	assert.equal(app.statuses.get("agmsg"), "agmsg: pi を名乗れなかった (exit -1)。Notify は受けない");
+	assert.equal(app.statuses.get("agmsg"), "agmsg: could not claim pi (exit -1). Notify is off");
 	assert.deepEqual(fake.calls("watch"), []);
 });
 
@@ -308,7 +308,7 @@ test("watch-once.sh が無ければ claim もせず、status に出す", async (
 	await until(() => app.statuses.get("agmsg") !== undefined);
 	await pause(100);
 
-	assert.match(app.statuses.get("agmsg")!, /^agmsg: Codex driver の watch-once\.sh が無いので何もしない/);
+	assert.match(app.statuses.get("agmsg")!, /^agmsg: doing nothing: the Codex driver's watch-once\.sh is missing/);
 	assert.deepEqual(fake.log(), [`identities ${cwd} pi`]);
 });
 
@@ -318,7 +318,7 @@ test("script の置き場が cwd の中にあるときは何も起こさない",
 	const { app } = await session(fake, { cwd });
 	await pause(100);
 
-	assert.match(app.statuses.get("agmsg")!, /^agmsg: script の置き場 .* が作業ディレクトリと重なるので起こさない$/);
+	assert.match(app.statuses.get("agmsg")!, /^agmsg: not started: the script directory .* overlaps the working directory$/);
 	assert.deepEqual(fake.log(), []);
 });
 
@@ -327,7 +327,7 @@ test("cwd が script の置き場の中にあるときも何も起こさない",
 	const { app } = await session(fake, { cwd: join(fake.root, "scripts") });
 	await pause(100);
 
-	assert.match(app.statuses.get("agmsg")!, /が作業ディレクトリと重なるので起こさない$/);
+	assert.match(app.statuses.get("agmsg")!, /overlaps the working directory$/);
 	assert.deepEqual(fake.log(), []);
 });
 
@@ -340,7 +340,7 @@ test("一時ファイルの置き場が cwd の中にあるときは何も起こ
 	const { app } = await session(fake, { cwd });
 	await pause(100);
 
-	assert.match(app.statuses.get("agmsg")!, /^agmsg: 一時ファイルの置き場 .* が作業ディレクトリの中にあるので起こさない$/);
+	assert.match(app.statuses.get("agmsg")!, /^agmsg: not started: the temp directory .* is inside the working directory$/);
 	assert.deepEqual(fake.log(), []);
 });
 

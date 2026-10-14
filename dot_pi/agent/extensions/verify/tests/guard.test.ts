@@ -52,15 +52,15 @@ test("PATHの要素がsandboxの中から書ける場所にあっても、そこ
 		// 次のターンの始まり。人は何も打っていない。
 		await app.emit("agent_start");
 		assert.equal(existsSync(join(outside, "mark")), false, "置かれた git が sandbox の外で走った");
-		assert.match(app.statuses.get("verify") ?? "", /^検証: 未実行/, "書ける場所の外にある本物の git でリポジトリを見つけている");
+		assert.match(app.statuses.get("verify") ?? "", /^verify: not run/, "書ける場所の外にある本物の git でリポジトリを見つけている");
 		await app.emit("agent_settled", { aborted: false });
 
 		// 書ける場所の外に git が無ければ起こさない。名前で起こし直すと、飛ばした候補を拾う。
 		process.env.PATH = bin;
 		await app.command("verify");
 		assert.equal(existsSync(join(outside, "mark")), false);
-		assert.match(app.notices.at(-1)!, /git が見つからない/);
-		assert.doesNotMatch(app.notices.at(-1)!, /リポジトリの外/);
+		assert.match(app.notices.at(-1)!, /git not found/);
+		assert.doesNotMatch(app.notices.at(-1)!, /outside a git repository/);
 	} finally {
 		process.env.PATH = path;
 		rmSync(join(bin, "git"), { force: true });
@@ -88,9 +88,9 @@ test("readonlyでは、検証コマンドが落ちてもモデルへ差し戻さ
 		writeFileSync(join(root, "a.txt"), "two\n");
 		assert.equal(await app.emit("agent_before_settle", boundary), undefined, "直せる相手がいないので続行させない");
 		assert.equal(existsSync(join(root, "artifact.txt")), false);
-		assert.match(app.statuses.get("verify") ?? "", /^検証: 失敗 \(echo built > artifact\.txt: 終了コード 1。readonly .*モデルへは戻していない\)$/);
+		assert.match(app.statuses.get("verify") ?? "", /^verify: failed \(echo built > artifact\.txt: exit code 1\. It ran inside a readonly .*Not sent back to the model\)$/);
 		await app.emit("agent_settled", { aborted: false });
-		assert.match(app.notices.at(-1)!, /^検証: 失敗 .*readonly/);
+		assert.match(app.notices.at(-1)!, /^verify: failed .*readonly/);
 	} finally {
 		await app.emit("session_shutdown", { reason: "quit" });
 	}
@@ -130,7 +130,7 @@ test("guardと一緒に読み込むと、検証コマンドはguardのsandboxの
 		writeFileSync(join(root, "a.txt"), "three\n");
 		assert.equal(await app.emit("agent_before_settle", boundary), undefined);
 		assert.equal(existsSync(join(outside, "mark")), true, "full は sandbox なし");
-		assert.equal(app.statuses.get("verify"), "検証: 成功");
+		assert.equal(app.statuses.get("verify"), "verify: passed");
 		assert.deepEqual(app.messages, [], "知らせるのは最終結果が決まる agent_settled");
 		await app.emit("agent_settled", { aborted: false });
 

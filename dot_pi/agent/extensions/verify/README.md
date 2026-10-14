@@ -46,26 +46,26 @@ project の中 (`.pi/` など) には置かない。そこはモデルが edit /
 
 | 表示 | 意味 |
 | --- | --- |
-| `検証: 未実行 (理由)` | 今の作業ツリーは確かめていない。理由は下の表 |
-| `検証: 成功` | 登録した全コマンドが 0 で終わった。確かめたのはそれだけで、作業の成否ではない |
-| `検証: 失敗 (コマンド: 終わり方)` | 0 以外で終わった、シグナルで死んだ、起動できなかった、timeout を過ぎた |
-| `検証: 中断 (コマンド の途中で止めた)` | 走っている検証を Esc・`/verify stop`・セッションの終わりで止めた |
+| `verify: not run (理由)` | 今の作業ツリーは確かめていない。理由は下の表 |
+| `verify: passed` | 登録した全コマンドが 0 で終わった。確かめたのはそれだけで、作業の成否ではない |
+| `verify: failed (コマンド: 終わり方)` | 0 以外で終わった、シグナルで死んだ、起動できなかった、timeout を過ぎた |
+| `verify: interrupted (stopped during コマンド)` | 走っている検証を Esc・`/verify stop`・セッションの終わりで止めた |
 
-走っている間は `検証: 実行中 (1/2 コマンド)`。
+走っている間は `verify: running (1/2 コマンド)`。
 
 未実行の理由:
 
 | 理由 | いつ |
 | --- | --- |
-| このセッションではまだ確かめていない | セッションの最初。結果はメモリの中だけにあり、quit / resume / reload をまたがない |
-| 確かめた後にファイルが変わった | 成功か失敗が出た後で、作業ツリーの状態が変わった |
-| 確かめた後に登録が変わった | 成功か失敗が出た後で、`/verify add` / `remove` で登録が変わった (別のセッションからでも)。走らせていないコマンドがあるのに成功、外したコマンドの失敗、を残さない |
-| 検証中にファイルが変わった | 走らせる前と後で状態が違う。成功でも失敗でも結果を使わず、モデルへも戻さない |
-| タスクが中断されたので確かめていない | Esc で止めたタスクがファイルを変えていた。Pi は中断したタスクに `agent_before_settle` を送らない |
-| 確かめないままタスクが終わった | ファイルを変えたタスクが、検証を後に回したまま終わった |
-| git からファイル状態を取れなかった | `git ls-files` が失敗した |
-| git が見つからない (sandbox の中から書けない場所の PATH に無い) | guard が git の実体を返さなかった。`verify.json` にどこかの project の登録があるときだけ出す (下の「できないこと」) |
-| コマンド を guard が通さなかった: 理由 | guard が準備を断った (full 以外で OS の sandbox が使えない、固定の禁止に当たる)。sandbox なしでは走らせず、モデルへも戻さない |
+| not checked yet in this session | セッションの最初。結果はメモリの中だけにあり、quit / resume / reload をまたがない |
+| files changed after the check | 成功か失敗が出た後で、作業ツリーの状態が変わった |
+| registration changed after the check | 成功か失敗が出た後で、`/verify add` / `remove` で登録が変わった (別のセッションからでも)。走らせていないコマンドがあるのに成功、外したコマンドの失敗、を残さない |
+| files changed during the check | 走らせる前と後で状態が違う。成功でも失敗でも結果を使わず、モデルへも戻さない |
+| not checked because the task was interrupted | Esc で止めたタスクがファイルを変えていた。Pi は中断したタスクに `agent_before_settle` を送らない |
+| the task ended without a check | ファイルを変えたタスクが、検証を後に回したまま終わった |
+| could not get the file state from git | `git ls-files` が失敗した |
+| git not found on the PATH entries the sandbox cannot write to | guard が git の実体を返さなかった。`verify.json` にどこかの project の登録があるときだけ出す (下の「できないこと」) |
+| guard refused コマンド: 理由 | guard が準備を断った (full 以外で OS の sandbox が使えない、固定の禁止に当たる)。sandbox なしでは走らせず、モデルへも戻さない |
 
 ## guard の sandbox とモード
 
@@ -79,16 +79,16 @@ guard が読み込まれていれば、検証コマンドは guard に準備を�
 
 - 繋ぎ方は Pi のイベントバス。`pi.events.emit("guard:bash", { command, cwd, env, reply })` で頼むと、guard が `reply` に準備済みの `command` / `cwd` / `env` と、readonly かどうか (`readonly`) を渡すので、それを `/bin/bash -c` で起こす。返事が無ければ guard は居ないので、今までどおりそのまま起こす。guard の sandbox の部品を import する案は捨てた (境界を決める場所が 2 つになる)。
 - **ask でも確認は出さない。** 承認は `/verify add` を打った時点で済んでいる。タスクの終端のたびに訊き直すと、自動で確かめる意味が無くなる。モデルが書き換えられるのはコマンドが実行する中身 (テストコードなど) のほうで、それは sandbox が囲う。
-- **readonly では、失敗をモデルへ差し戻さない。** readonly のモデルは edit / write も bash での書き込みもできないので、検証が走るのは人か別のプロセスがファイルを変えたときだけで、差し戻しても直せる相手がいない。そのうえ、作業ツリーや `/tmp` に書く検証コマンドは、コードが正しくても sandbox のせいで落ちる。この dotfiles の `node dot_pi/agent/tests/run.mjs` も、`/tmp` に直に一時ディレクトリを作るテストが 1 つ `EROFS` で落ち、残りは通る (Arch で実測)。表示は `検証: 失敗 (コマンド: 終わり方。readonly の sandbox の中で走らせたので、書けずに落ちたのかもしれない。モデルへは戻していない)` にする。
+- **readonly では、失敗をモデルへ差し戻さない。** readonly のモデルは edit / write も bash での書き込みもできないので、検証が走るのは人か別のプロセスがファイルを変えたときだけで、差し戻しても直せる相手がいない。そのうえ、作業ツリーや `/tmp` に書く検証コマンドは、コードが正しくても sandbox のせいで落ちる。この dotfiles の `node dot_pi/agent/tests/run.mjs` も、`/tmp` に直に一時ディレクトリを作るテストが 1 つ `EROFS` で落ち、残りは通る (Arch で実測)。表示は `verify: failed (コマンド: 終わり方. It ran inside a readonly sandbox, so it may have failed because it could not write. Not sent back to the model)` にする。
   - 書けずに落ちたのか、コードのせいで落ちたのかは見分けていない。出力の末尾は検証コマンドのもので、当てにできない。
   - 捨てた案: readonly では走らせない (未実行にする)。読むだけの検証コマンド (型検査、lint) まで走らなくなり、guard が readonly 用に準備する口 (専用の `TMPDIR`) も要らなくなる。
 - **guard の固定の禁止 (force push) は効く。** 確認つきの規則 (`rm`、`git push` など) は、上と同じ理由で訊かない。
-- guard が準備を断ったら走らせず、`検証: 未実行 (コマンド を guard が通さなかった: 理由)` にする。
+- guard が準備を断ったら走らせず、`verify: not run (guard refused コマンド: 理由)` にする。
 - settings.json の `shellPath` と `shellCommandPrefix` も、bash ツールと同じに効く。
 - guard の root は Pi を起動したディレクトリで、検証コマンドは作業ツリーの最上位で走る。リポジトリの下の階層で Pi を起動すると、検証コマンドが root の外 (同じリポジトリの別のディレクトリ) に書こうとして失敗する。
 - **`.git` を持つディレクトリを消して作り直す検証コマンドは、normal / ask では 2 回目から失敗する。** guard は root の下で見つけたリポジトリ (3 段下まで) の `.git/hooks` と `.git/config` を sandbox の中から消せなくしている (guard の README の「書かせない git の場所」)。`rm -rf build` で CMake の FetchContent の checkout (`build/_deps/<名前>-src`) ごと消す、`git clean -ffdx` を打つ、テストの中で固定の場所に `git clone` し直す、といったコマンドは、前の実行が残したリポジトリを消せず `Device or resource busy` で終わる。検証は失敗になり、タスクのたびにモデルへ 2 回差し戻される。guard の側で塞ぐ範囲を狭めるかどうかは未決 (guard の README)。それまでは、そういうコマンドは登録しないか、full で使う。
-- **検証が走っている間に `/permissions` を厳しい側へ変えても、走っている検証コマンドは止まらない。** sandbox は起動したときのモードで決まり、走っている間は変えられない。monitor の job はこのとき止めるが、検証コマンドは前面の bash ツールと同じ扱いで、起動したときのモードの sandbox のまま最後まで走る (normal で起こした検証は、readonly に変えた後も root に書ける)。書いた場合の結果は「検証中にファイルが変わった」で捨てる。すぐ止めたいときは `/verify stop`。guard から verify へ「止めろ」と伝える口は作っていない。
-- **guard が準備した sandbox が、走らせる段で起動しなかったときは「失敗」になり、モデルへ差し戻す。** guard が準備を断ったとき (上) は未実行にするが、準備が通った後で launcher が起動に失敗したとき (user namespace を後から止められた、など) は、verify からはコマンドが 0 以外で終わったようにしか見えない。出力の末尾に guard の `guard[sandbox]: The OS sandbox did not start, so nothing was executed ... Stop and tell the user` が付くので、モデルは「原因を直すこと」と「止まって利用者に伝えること」の両方を受け取る。何も実行されていないのに、表示は未実行でなく失敗になる。末尾の文面で見分ける案は捨てた: 末尾は検証コマンドの出力で、モデルが書き換えられるテストコードが同じ文を出せば、本物の失敗を未実行にして差し戻しを避けられる。終了コードも、コマンド自身が同じ値を出せる。見分けるには、guard が印 (起動したかどうか) を返事と別の道で渡す必要があり、`guard:bash` の形が変わる。入れていない。起きるのは、タスクの途中で sandbox が壊れたか、sandbox が使えない間に人や `!` がファイルを変えたとき。
+- **検証が走っている間に `/permissions` を厳しい側へ変えても、走っている検証コマンドは止まらない。** sandbox は起動したときのモードで決まり、走っている間は変えられない。monitor の job はこのとき止めるが、検証コマンドは前面の bash ツールと同じ扱いで、起動したときのモードの sandbox のまま最後まで走る (normal で起こした検証は、readonly に変えた後も root に書ける)。書いた場合の結果は「files changed during the check」で捨てる。すぐ止めたいときは `/verify stop`。guard から verify へ「止めろ」と伝える口は作っていない。
+- **guard が準備した sandbox が、走らせる段で起動しなかったときは「失敗」になり、モデルへ差し戻す。** guard が準備を断ったとき (上) は未実行にするが、準備が通った後で launcher が起動に失敗したとき (user namespace を後から止められた、など) は、verify からはコマンドが 0 以外で終わったようにしか見えない。出力の末尾に guard の `guard[sandbox]: The OS sandbox did not start, so nothing was executed ... Stop and tell the user` が付くので、モデルは「Fix the cause.」と「止まって利用者に伝えること」の両方を受け取る。何も実行されていないのに、表示は未実行でなく失敗になる。末尾の文面で見分ける案は捨てた: 末尾は検証コマンドの出力で、モデルが書き換えられるテストコードが同じ文を出せば、本物の失敗を未実行にして差し戻しを避けられる。終了コードも、コマンド自身が同じ値を出せる。見分けるには、guard が印 (起動したかどうか) を返事と別の道で渡す必要があり、`guard:bash` の形が変わる。入れていない。起きるのは、タスクの途中で sandbox が壊れたか、sandbox が使えない間に人や `!` がファイルを変えたとき。
 - sandbox の中の検証を止めるとき (`/verify stop`、timeout)、中身は SIGTERM を受けずに消える。bubblewrap の launcher が死ぬと中身ごと消えるためで、コマンドの `trap` の後始末は走らない。
 - Arch (bubblewrap 0.13.0) で確かめたこと: この dotfiles の `node dot_pi/agent/tests/run.mjs` は normal の sandbox の中でも全部通る (guard のテストが起こす bubblewrap は入れ子で動く)。sandbox の中の `sleep` を `/verify stop` と timeout で止めると、プロセスは残らない。
 
@@ -123,7 +123,7 @@ git が無視していないファイル (追跡済みと未追跡) のパス・
 - **承認しているのはコマンドの文字列で、それが実行する中身ではない。** 登録したコマンドが読むテストコード・`package.json` の scripts・Makefile などは root の中にあり、モデルが edit / write で確認なしに書き換えられる。その中身が、タスクの終端で、確認なしに走る。guard があれば normal 以下では sandbox の中なので、届くのは bash ツールと同じ範囲まで。full と guard の無い Pi では、`~/.ssh`、`~/.zshrc`、`verify.json` 自身などにも届く。信用できないタスクでは登録を外しておく。
 - **ファイル状態を取る git は sandbox の外で走る。** `git rev-parse` と `git ls-files` を拡張のプロセスから直接起こしている (`core.fsmonitor` は無効にしている)。登録が 1 つも無くても、ターンの始めにリポジトリを探す `git rev-parse` は走る。
   - git の実体は guard に訊く (Pi のイベントバスの `guard:binary`)。名前だけで起こすと PATH を探し、PATH の要素が sandbox の中から書ける場所にあると (root の中の `.venv/bin`、guard の `allowWrite` で開けた `~/.local/share/mise` の shims)、モデルが bash でそこに置いた `git` が、次のターンの始めに sandbox の外で走った (レビューでの実測)。guard は PATH の相対の要素と書ける場所の中にあるものを飛ばし、symlink を解いた先を返す (guard の README の「そのほかの決めごと」)。
-  - 書ける場所の外に git が無いホストでは git を起こさず、検証は走らない。`/verify` は、リポジトリの外のときとは別の文面 (`git が見つからない (sandbox の中から書けない場所の PATH に無い)`) を出す。`verify.json` に登録が 1 つでもあれば、セッションの最初 (途中で拾えなくなったら次のターンの始め) に同じ理由を status に出し、warning を 1 セッションに 1 度出す。
+  - 書ける場所の外に git が無いホストでは git を起こさず、検証は走らない。`/verify` は、リポジトリの外のときとは別の文面 (`git not found on the PATH entries the sandbox cannot write to`) を出す。`verify.json` に登録が 1 つでもあれば、セッションの最初 (途中で拾えなくなったら次のターンの始め) に同じ理由を status に出し、warning を 1 セッションに 1 度出す。
     - 出すかどうかは「この project に登録があるか」ではなく「どこかの project に登録があるか」で決めている。project の鍵は git に訊くので、git が無いとここがどの project かが分からない。登録のある project が他にあれば、リポジトリの外や登録の無い project で起動しても出る。登録が 1 つも無いホストでは何も出さない。
     - **mise の shim 経由の git は拾えないまま。** shim (`~/.local/share/mise/shims/git`) は mise 本体への symlink で、guard は symlink を解いた先の名前が違う候補を飛ばす。置き場が書けるかどうかには関わらない (置き場は、guard の既定では sandbox の中から書けない。guard の README の「そのほかの決めごと」)。mise で入れた git しか無いホストでは上の表示になり、検証は走らない。別の名前の実体への symlink を飛ばすことは guard のテストで見ているが、mise のあるホストでは確かめていない。
   - guard が読み込まれていなければ sandbox も無いので、今までどおり名前で起こす。
@@ -131,11 +131,11 @@ git が無視していないファイル (追跡済みと未追跡) のパス・
 - **git リポジトリの外では使えない。** ファイル状態を git の一覧から作るため。`/verify add` は断る。
 - **複数の Pi が同時に `/verify add` / `remove` すると、後から書いた方が残る。** 読んでから書くまでの間に鍵を掛けていない。
 - **git が無視しているファイルの変更は見えない。** ビルド成果物だけが変わっても、変更なしとして扱う。初期化していない submodule (`.git` の無い空のディレクトリ) の中も見ない。
-- **追跡下のファイルを書き換える検証コマンドは、毎回「検証中にファイルが変わった」になる。** formatter の `--write` や、無視していない場所に成果物を吐くテストなど。誰が変えたかは区別できない。
+- **追跡下のファイルを書き換える検証コマンドは、毎回「files changed during the check」になる。** formatter の `--write` や、無視していない場所に成果物を吐くテストなど。誰が変えたかは区別できない。
 - **走っている間に変わって元に戻った場合**は気付かない。見ているのは走らせる前と後だけ。
 - **Esc で止まるのは TUI だけで、鍵は Escape に固定。** 境界の間は `ctx.signal` が無いので、端末の生の入力から Escape を拾っている。`app.interrupt` を別の鍵に割り当てていると、その鍵ではタスクは中断されるが検証は止まらず、終わるか timeout まで待つ。`/verify stop` はどのモードでも効く。検証中に別の用で Escape を押しても (補完を閉じるなど) 検証は止まる。
-- **status の表示は最後に確かめ直した時点のもの。** タスクの外で人や job がファイルを変えても、次のタスクの最初か `/verify` までは `成功` のまま出ている。
-- **print / json モード (`pi -p`、subagent の子) でも走る。** 子が変更を加えるたびに子の中で検証が走り、親でももう 1 度走る。並列の子は互いの書きかけを見るので、「検証中にファイルが変わった」になりやすい。子を見分ける口が無いので止めていない。
+- **status の表示は最後に確かめ直した時点のもの。** タスクの外で人や job がファイルを変えても、次のタスクの最初か `/verify` までは `passed` のまま出ている。
+- **print / json モード (`pi -p`、subagent の子) でも走る。** 子が変更を加えるたびに子の中で検証が走り、親でももう 1 度走る。並列の子は互いの書きかけを見るので、「files changed during the check」になりやすい。子を見分ける口が無いので止めていない。
 - **状態を取る時間はファイル数と大きさに比例する。** 1 つのタスクで 2〜3 回、無視されていない全ファイルを読む。
 - **`setsid` でグループを抜けた子孫は止められない。** シェルが終わってから 250 ms だけ出力を待ち、残っていても先へ進む。
 - **agmsg の完了報告には載せない。** verify は agmsg を呼んでいない。

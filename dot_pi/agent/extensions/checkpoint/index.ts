@@ -58,8 +58,8 @@ export const HOOKS_UNSTOPPABLE: string[] = ["2.54", "2.55"];
 export function hookGate(output: string): string | undefined {
 	// 版の後ろに "(Apple Git-157)" や ".windows.1" が付くことがある。
 	const [, version, series] = output.match(/^git version ((\d+\.\d+)\S*)/) ?? [];
-	if (!version) return "checkpoint: 基準を取らない (git の版を読めない。設定に書いた hook を止められる git 2.56 以上が要る)";
-	if (HOOKS_UNSTOPPABLE.includes(series)) return `checkpoint: 基準を取らない (git ${version} は設定に書いた hook を止められない。git 2.56 以上が要る)`;
+	if (!version) return "checkpoint: not taking a baseline (cannot read the git version; need git 2.56 or later, which can stop hooks set in config)";
+	if (HOOKS_UNSTOPPABLE.includes(series)) return `checkpoint: not taking a baseline (git ${version} cannot stop hooks set in config; need git 2.56 or later)`;
 }
 
 /**
@@ -199,9 +199,9 @@ const MONITOR_JOBS = "monitor:jobs";
 const GUARD_BINARY = "guard:binary";
 const DIFF_LINES = 200;
 /** 確認なしで戻してよい唯一の状態。 */
-const OWN = "Pi が書いたまま";
+const OWN = "unchanged since Pi wrote it";
 /** guard が「書ける場所の外に git は無い」と答えたときの失敗。 */
-const NO_GIT = "sandbox の中から書けない場所の PATH に git が無い";
+const NO_GIT = "no git on the PATH entries the sandbox cannot write to";
 
 export default function (pi: ExtensionAPI) {
 	let baseline: Baseline | undefined;
@@ -228,8 +228,8 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	function origin(path: string) {
-		if (!written.has(path)) return "Pi の write / edit 以外の変更";
-		return !mixed.has(path) && written.get(path) === fingerprint(join(baseline!.top, path)) ? OWN : "Pi と別の変更が混じっている";
+		if (!written.has(path)) return "changed by something other than Pi's write / edit";
+		return !mixed.has(path) && written.get(path) === fingerprint(join(baseline!.top, path)) ? OWN : "Pi's changes mixed with other changes";
 	}
 
 	pi.on("tool_call", async (event, ctx) => {
@@ -265,11 +265,11 @@ export default function (pi: ExtensionAPI) {
 
 	/** いま戻すと、動いている Pi か走っている job が、戻した後で書き換えうる。その断り文。戻してよければ無し。 */
 	function stillWriting(ctx: ExtensionContext): string | undefined {
-		if (!ctx.isIdle()) return "checkpoint: Pi が動いている間は戻さない。止まってからやり直す。";
+		if (!ctx.isIdle()) return "checkpoint: not restoring while Pi is running. Try again after it stops.";
 		const busy = runningJobs();
 		if (busy.length === 0) return undefined;
 		// /jobs stop は、シグナルの届かない job (sudo で root になったものなど) を止められず、running のまま残す (monitor の README)。
-		return `checkpoint: monitor の job が走っている間は戻さない (${busy.join(", ")})。書いている最中に戻すと、戻した後でまた書き換えられる。/jobs stop <id> で止めるか、終わるのを待ってからやり直す。止めても running のまま残る job は、そのプロセスを自分で終わらせるか、Pi を起動し直す。`;
+		return `checkpoint: not restoring while monitor jobs are running (${busy.join(", ")}). A job still writing could overwrite the file again after the restore. Stop it with /jobs stop <id> or wait for it to finish, then try again. If a job stays running after being stopped, end its process yourself or restart Pi.`;
 	}
 
 	function forget() {
@@ -296,7 +296,7 @@ export default function (pi: ExtensionAPI) {
 			if (await gate(ctx)) return false;
 			const taken = await snapshot(git, ctx.cwd);
 			if (!taken) {
-				if (baseline) ctx.ui.notify("checkpoint: git の作業ツリーの外なので基準を取れなかった。前の基準をそのまま使う。", "warning");
+				if (baseline) ctx.ui.notify("checkpoint: could not take a baseline because this is outside a git work tree. Keeping the previous baseline.", "warning");
 				return false;
 			}
 			forget();
@@ -306,7 +306,7 @@ export default function (pi: ExtensionAPI) {
 		} catch (error) {
 			const reason = error instanceof Error ? error.message : String(error);
 			// git の実体が無いことを毎回は知らせない。次の依頼でも同じ理由で取れず、同じ warning が続く。知らせるのは 1 セッションに 1 度と、人が頼んだとき。
-			if (reason !== NO_GIT || asked || !toldNoGit) ctx.ui.notify(`checkpoint: 基準を取れなかった (${reason})${baseline ? "。前の基準をそのまま使う。" : ""}`, "warning");
+			if (reason !== NO_GIT || asked || !toldNoGit) ctx.ui.notify(`checkpoint: could not take a baseline (${reason})${baseline ? ". Keeping the previous baseline." : ""}`, "warning");
 			toldNoGit ||= reason === NO_GIT;
 			return false;
 		}
@@ -332,7 +332,7 @@ export default function (pi: ExtensionAPI) {
 			// 別のリポジトリや消えた tree は、黙って次の依頼で取り直す。git の実体が無いときは次の依頼でも取り直せないので、ここで知らせる。
 			if (!(error instanceof Error) || error.message !== NO_GIT) return;
 			toldNoGit = true;
-			ctx.ui.notify(`checkpoint: セッションに残った基準を使えない (${NO_GIT})。`, "warning");
+			ctx.ui.notify(`checkpoint: cannot use the baseline saved in the session (${NO_GIT}).`, "warning");
 		}
 	});
 
@@ -359,18 +359,18 @@ export default function (pi: ExtensionAPI) {
 			}
 			const taken = verb === "new" && (await take(ctx, true));
 			if (!baseline) {
-				ctx.ui.notify("checkpoint: 基準が無い。git の作業ツリーの中で、最初の依頼を送った時点か /checkpoint new で取る。", "info");
+				ctx.ui.notify("checkpoint: no baseline. Inside a git work tree, one is taken when you send the first request, or with /checkpoint new.", "info");
 				return;
 			}
 			if (verb === "new") {
-				if (taken) ctx.ui.notify(`checkpoint: 今の作業ツリーを新しい基準にした (${baseline.tree.slice(0, 12)})。`, "info");
+				if (taken) ctx.ui.notify(`checkpoint: took the current work tree as the new baseline (${baseline.tree.slice(0, 12)}).`, "info");
 				return;
 			}
 			const now = await snapshot(git, baseline.top);
 			if (!now) throw new Error(`checkpoint: ${baseline.top} is no longer a git work tree`);
 			const list = await changes(git, baseline.top, baseline.tree, now.tree);
 			if (list.length === 0) {
-				ctx.ui.notify("checkpoint: 基準から変わったファイルは無い。", "info");
+				ctx.ui.notify("checkpoint: no files changed since the baseline.", "info");
 				return;
 			}
 			// 入力そのままの名前が一覧にあればそれを、無ければ前後の空白を除いた名前を指したものとして扱う。
@@ -382,14 +382,14 @@ export default function (pi: ExtensionAPI) {
 					.trimEnd()
 					.split("\n");
 				const rest = lines.length - DIFF_LINES;
-				if (rest > 0) lines.splice(DIFF_LINES, rest, `… 残り ${rest} 行。全部は git diff ${range.join(" ")}`);
-				ctx.ui.notify(lines.join("\n") || `checkpoint: ${path} に差分は無い。`, "info");
+				if (rest > 0) lines.splice(DIFF_LINES, rest, `… ${rest} more lines. For the full diff: git diff ${range.join(" ")}`);
+				ctx.ui.notify(lines.join("\n") || `checkpoint: no diff for ${path}.`, "info");
 				return;
 			}
 			if (verb === "restore") {
 				const change = list.find((item) => item.path === path);
 				if (!change) {
-					ctx.ui.notify(`checkpoint: 「${path}」は復元候補に無い。/checkpoint の一覧にあるパスをそのまま渡す。`, "warning");
+					ctx.ui.notify(`checkpoint: "${path}" is not a restore candidate. Pass a path exactly as listed by /checkpoint.`, "warning");
 					return;
 				}
 				const busy = stillWriting(ctx);
@@ -399,36 +399,36 @@ export default function (pi: ExtensionAPI) {
 				}
 				const blocker = obstacle(baseline.top, path);
 				if (blocker) {
-					ctx.ui.notify(`checkpoint: ${path} を戻すと「${blocker}」が消えるので戻さない。先に「${blocker}」を戻すか、どかす。`, "warning");
+					ctx.ui.notify(`checkpoint: not restoring ${path} because it would remove "${blocker}". Restore or move "${blocker}" first.`, "warning");
 					return;
 				}
 				if (change.status !== "A") {
 					// 並びは "<パス>" NUL "filter" NUL "<値>" NUL。
 					const filter = (await git(baseline.top, ["check-attr", "-z", "filter", "--", path])).toString().split("\0")[2];
 					if ((await filters(git, baseline.top)).names.has(filter)) {
-						ctx.ui.notify(`checkpoint: ${path} には filter「${filter}」が掛かる。その filter を通さずに取った基準は作業ツリーの形と合わないことがあるので戻さない。`, "warning");
+						ctx.ui.notify(`checkpoint: not restoring ${path} because filter "${filter}" applies to it. The baseline was taken without that filter and may not match the file's form in the work tree.`, "warning");
 						return;
 					}
 				}
 				// 基準の中身が欠けている (object を消された、gc された) まま git restore を打つと、git は作業ツリーのファイルを消してから失敗する。
 				if (change.status !== "A" && !(await baselineFingerprint(git, baseline, path).catch(() => undefined))) {
-					ctx.ui.notify(`checkpoint: ${path} の基準の中身を git から読めないので戻さない。`, "warning");
+					ctx.ui.notify(`checkpoint: not restoring ${path} because its baseline content cannot be read from git.`, "warning");
 					return;
 				}
 				const seen = fingerprint(join(baseline.top, path));
 				const from = origin(path);
 				if (from !== OWN) {
 					if (!ctx.hasUI) {
-						ctx.ui.notify(`checkpoint: ${path} は「${from}」。確認を取れないので戻さない。`, "warning");
+						ctx.ui.notify(`checkpoint: ${path} is marked "${from}". Not restoring because confirmation is unavailable.`, "warning");
 						return;
 					}
 					// 基準を取ったとき ignore されていたファイルは、前からあっても基準に入っておらず、A として出る。
 					const asked =
 						change.status === "A"
-							? ctx.ui.confirm(`${path} を消す?`, `このファイルは「${from}」で、基準に無い。基準を取ったとき .gitignore に当たっていたファイルなら、タスクの前からあったものでも消える。`)
-							: ctx.ui.confirm(`${path} を基準に戻す?`, `このファイルは「${from}」。戻すと、Pi 以外が加えた変更も消える。`);
+							? ctx.ui.confirm(`Delete ${path}?`, `This file is marked "${from}" and is not in the baseline. If it matched .gitignore when the baseline was taken, it is deleted even if it existed before the task.`)
+							: ctx.ui.confirm(`Restore ${path} to the baseline?`, `This file is marked "${from}". Restoring also discards changes made by anything other than Pi.`);
 					if (!(await asked)) {
-						ctx.ui.notify(`checkpoint: ${path} は戻さなかった。`, "info");
+						ctx.ui.notify(`checkpoint: did not restore ${path}.`, "info");
 						return;
 					}
 				}
@@ -444,7 +444,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				if (fingerprint(join(baseline.top, path)) !== seen || obstacle(baseline.top, path)) {
-					ctx.ui.notify(`checkpoint: ${path} は確認の間に中身が変わったので戻さなかった。/checkpoint からやり直す。`, "warning");
+					ctx.ui.notify(`checkpoint: did not restore ${path} because its content changed while waiting for confirmation. Start again from /checkpoint.`, "warning");
 					return;
 				}
 				if (change.status === "A") rmSync(join(baseline.top, path));
@@ -452,14 +452,14 @@ export default function (pi: ExtensionAPI) {
 				else await git(baseline.top, ["restore", `--source=${baseline.tree}`, "--worktree", "--ignore-skip-worktree-bits", "--", path], env);
 				written.delete(path);
 				mixed.delete(path);
-				ctx.ui.notify(`checkpoint: ${path} を基準に戻した。戻す前の作業ツリーは tree ${before?.tree} (git show ${before?.tree}:<パス> で読める)。`, "info");
+				ctx.ui.notify(`checkpoint: restored ${path} to the baseline. The work tree before the restore is tree ${before?.tree} (read it with git show ${before?.tree}:<path>).`, "info");
 				return;
 			}
 			ctx.ui.notify(
 				[
-					`checkpoint: 基準 (${baseline.tree.slice(0, 12)}) から変わったファイル`,
+					`checkpoint: files changed since the baseline (${baseline.tree.slice(0, 12)})`,
 					...list.map((change) => `${change.status}  ${change.path}  ${origin(change.path)}`),
-					"差分は /checkpoint diff [パス]、戻すには /checkpoint restore <パス>",
+					"Show a diff with /checkpoint diff [path], restore with /checkpoint restore <path>",
 				].join("\n"),
 				"info",
 			);

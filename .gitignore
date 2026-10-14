@@ -16,6 +16,7 @@ dot_config/zed/themes/
 .opencode
 .hermes
 .agent
+.venv
 
 # zed: not synced (host-specific ssh profiles, app state)
 dot_config/zed/

@@ -113,10 +113,10 @@ export default function (pi: ExtensionAPI) {
 		// それを sandbox の外で起こすことになるので、登録を訊く前にやめる。
 		const cwd = ctx.cwd;
 		const [root, home] = [realpathSync(cwd), realpathSync(limits.skillDir)];
-		if (within(root, home) || within(home, root)) return show(`agmsg: script の置き場 (${home}) が作業ディレクトリと重なるので起こさない`);
+		if (within(root, home) || within(home, root)) return show(`agmsg: not started: the script directory (${home}) overlaps the working directory`);
 		// 一時ファイルの置き場が cwd の中にあると、sandbox の中から書ける。
 		mkdirSync(limits.tmpDir, { recursive: true, mode: 0o700 });
-		if (within(root, realpathSync(limits.tmpDir))) return show(`agmsg: 一時ファイルの置き場 (${limits.tmpDir}) が作業ディレクトリの中にあるので起こさない`);
+		if (within(root, realpathSync(limits.tmpDir))) return show(`agmsg: not started: the temp directory (${limits.tmpDir}) is inside the working directory`);
 		const owner = `${ctx.sessionManager.getSessionId()}.${process.pid}`;
 
 		/** 未読がある間、watch-once.sh はすぐ返る。同じ max_id で返り続ける間は repeatMs ごとにしか起こさない。 */
@@ -128,12 +128,12 @@ export default function (pi: ExtensionAPI) {
 				const pending = code === 0 ? /^status=pending count=(\d+) max_id=(\S+)$/m.exec(stdout) : null;
 				// 2 と `status=timeout` は未読なしの timeout。それ以外は設定か実行の失敗で、起こし直してもすぐ同じ形で返る。
 				// 2 だけでは見分けない。bash は構文エラーでも 2 を返す。
-				if (!pending && !(code === 2 && /^status=timeout$/m.test(stdout))) return show(`agmsg: 未読の監視が止まった (${firstLine(stderr) || `exit ${code}`})`);
+				if (!pending && !(code === 2 && /^status=timeout$/m.test(stdout))) return show(`agmsg: stopped watching for unread Messages (${firstLine(stderr) || `exit ${code}`})`);
 				const wait = Math.max(0, limits.repeatMs - (Date.now() - started));
 				if (pending && pending[2] !== last) {
 					last = pending[2];
 					// 件数だけ。本文も送り主も載せない。同じ max_id をもう 1 度流しても、monitor が重複として捨てる。
-					pi.events.emit(MONITOR_EVENT, { kind: "received", source: "agmsg", id: last, summary: `未読の Message が ${pending[1]} 件ある`, wake: true });
+					pi.events.emit(MONITOR_EVENT, { kind: "received", source: "agmsg", id: last, summary: `unread Messages: ${pending[1]}`, wake: true });
 				}
 				timer = setTimeout(() => watch(name), wait);
 				timer.unref();
@@ -144,8 +144,8 @@ export default function (pi: ExtensionAPI) {
 			if (mine !== generation || code !== 0) return;
 			const names = [...new Set(stdout.split("\n").flatMap((line) => line.split("\t")[1] ?? []))];
 			if (names.length === 0) return;
-			if (names.length > 1) return show(`agmsg: この project に Pi の登録が複数ある (${names.join(", ")}) ので名乗らない`);
-			if (!existsSync(watchOnce)) return show(`agmsg: Codex driver の watch-once.sh が無いので何もしない (${watchOnce})`);
+			if (names.length > 1) return show(`agmsg: not claiming: this project has more than one Pi registration (${names.join(", ")})`);
+			if (!existsSync(watchOnce)) return show(`agmsg: doing nothing: the Codex driver's watch-once.sh is missing (${watchOnce})`);
 			const [name] = names;
 			run(join(scripts, "actas-claim.sh"), [cwd, TYPE, name, owner], limits.claimTimeoutMs, (claimed, out) => {
 				if (mine !== generation) return;
@@ -155,8 +155,8 @@ export default function (pi: ExtensionAPI) {
 					show(`agmsg: ${name}`);
 					return watch(name);
 				}
-				if (status?.[1] === "held") return show(`agmsg: ${name} は別のセッション (${/owner=(\S+)/.exec(status[0])?.[1]}) が名乗っている。Notify は受けない`);
-				show(`agmsg: ${name} を名乗れなかった (${status?.[0] ?? `exit ${claimed}`})。Notify は受けない`);
+				if (status?.[1] === "held") return show(`agmsg: ${name} is claimed by another session (${/owner=(\S+)/.exec(status[0])?.[1]}). Notify is off`);
+				show(`agmsg: could not claim ${name} (${status?.[0] ?? `exit ${claimed}`}). Notify is off`);
 			});
 		});
 	});
