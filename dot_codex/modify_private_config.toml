@@ -5,6 +5,7 @@
      Codex/host 所有 (実ファイルの値を引き継ぐ): mcp_servers, plugins, notify,
        shell_environment_policy.set, sandbox_workspace_write.writable_roots,
        features 直下 (code_mode / js_repl / reasoning_effort_override を除く), tui.model_availability_nux,
+       tui.screen_reader_detection_done,
        上記以外の top-level table 全て (desktop / marketplaces / projects / hooks など)
      chezmoi 所有: それ以外
    $cur は現在の実ファイル。fresh host (stdin 空) では既定値を出す。
@@ -20,8 +21,8 @@
 # Model and response behavior
 ################################################################################
 
-# Primary model. 高品質なコーディング作業を優先する。
-model = "gpt-6-sol"
+# Primary model. 高品質なコーディング作業を優先する。gpt-6-sol より効率がよいので 6.1 にする。
+model = "gpt-6.1-sol"
 personality = "friendly"
 # /review follows the current session model unless explicitly overridden.
 # review_model = "gpt-5.6-sol"
@@ -197,6 +198,13 @@ alternate_screen = "always"
 # 注意: 誤ったモード遷移が入力事故に直結するとの指摘あり。合わないと感じたら
 # この行を false にするか、下の ctrl-alt-v / スラッシュコマンド /vim で都度トグルする。
 vim_mode_default = true
+
+# screen_reader_detection_done は Codex が起動時に 1 度だけ検出して tui の中に書く
+# (tui/src/screen_reader.rs)。消すと次の起動で検出し直して書き戻すので、ここで引き継ぐ。
+# animations は上で明示しているので、検出しても Codex は animations を書かない。
+{{ if and (hasKey $cur "tui") (hasKey $cur.tui "screen_reader_detection_done") -}}
+screen_reader_detection_done = {{ toJson $cur.tui.screen_reader_detection_done }}
+{{ end -}}
 
 # tui.model_availability_nux は Codex が「新モデル案内を表示済み」として tui の中に書く。
 # tui 自体は chezmoi 所有なので末尾の denylist では拾えず、ここで個別に引き継ぐ。
