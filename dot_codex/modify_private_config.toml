@@ -172,6 +172,13 @@ ignore_default_excludes = false
 persistence = "save-all"
 max_bytes = 10485760
 
+[memories]
+# 既定の gpt-5.6-luna / gpt-5.6-terra (model-provider/src/provider.rs) より新しいモデルにする (#51)。
+# 効くのは [features] memories = true のときだけ (memories/write/src/start.rs)。features は実ファイルを引き継ぐ。
+# root に置いても key を typo しても、--strict-config 以外ではエラーも警告も出ず、既定のモデルのまま動く (serde に deny_unknown_fields が無い)。
+extract_model = "gpt-6-luna"
+consolidation_model = "gpt-6.1-sol"
+
 ################################################################################
 # TUI, feedback, and telemetry
 ################################################################################
@@ -397,7 +404,7 @@ enabled = true
 # 出力する (= chezmoi 所有の) key を除いた残りを全て引き継ぐ (denylist 方式)。
 # Codex が新しい table を増やしても apply で消えない。
 # root の scalar key はここに出すと TOML として不正 (table の後に root key) なので table のみ。
-{{- $managed := list "agents" "apps" "features" "feedback" "history" "mcp_servers" "model_providers" "notice" "otel" "plugins" "sandbox_workspace_write" "shell_environment_policy" "tui" }}
+{{- $managed := list "agents" "apps" "features" "feedback" "history" "mcp_servers" "memories" "model_providers" "notice" "otel" "plugins" "sandbox_workspace_write" "shell_environment_policy" "tui" }}
 {{- range $k, $v := $cur }}
 {{- if and (kindIs "map" $v) (not (has $k $managed)) }}
 
