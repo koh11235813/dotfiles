@@ -7,12 +7,14 @@ import { after, test } from "node:test";
 import guard from "../../guard/index.ts";
 import type { JobSummary } from "../../guard/monitor/jobs.ts";
 import { SHARED_TMP_PATHS, sandbox } from "../../guard/sandbox.ts";
-import checkpoint from "../index.ts";
+import checkpoint, { HOOKS_UNSTOPPABLE } from "../index.ts";
 import { extensionHost } from "../../../tests/extension-host.ts";
 
 // guard (monitor) と checkpoint を 1 つの Pi に載せたときの繋がり。job は full で走らせるので、実物の sandbox は要らない。
 // 本物の HOME と一時ディレクトリを巻き込まない (guard のテストと同じ理由)。job のログもこの下に出る。
 SHARED_TMP_PATHS.splice(0);
+// このホストの git が設定に書いた hook を止められない版 (2.54 / 2.55) でも基準を取れるよう、版の門を外す。ここのテストは hook を仕込まない。
+HOOKS_UNSTOPPABLE.splice(0);
 const base = realpathSync(mkdtempSync(join(tmpdir(), "checkpoint-monitor-")));
 const dir = (...parts: string[]) => {
 	const path = join(base, ...parts);

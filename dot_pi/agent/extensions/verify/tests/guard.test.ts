@@ -33,13 +33,13 @@ const boundary = { outcome: "completed", entries: [] as unknown[], continue: fal
 test("PATHの要素がsandboxの中から書ける場所にあっても、そこに置かれたgitをsandboxの外で起こさない", async () => {
 	const root = dir("path", "project");
 	const outside = dir("path", "outside");
-	// mise を shims で使っているホスト。置き場は guard が sandbox の中から書かせている。
-	const shims = dir("home", ".local", "share", "mise", "shims");
+	// root の中の `.venv/bin` を有効にしたシェルから Pi を起動したホスト。root の中なので、sandbox の中から書ける。
+	const bin = dir("path", "project", ".venv", "bin");
 	writeFileSync(join(root, "a.txt"), "one\n");
 	const realGit = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 	execFileSync(realGit, ["init", "-q"], { cwd: root });
 	const path = process.env.PATH;
-	process.env.PATH = `${shims}:${path}`;
+	process.env.PATH = `${bin}:${path}`;
 	const app = extensionHost();
 	guard(app.pi);
 	verify(app.pi);
@@ -48,7 +48,7 @@ test("PATHの要素がsandboxの中から書ける場所にあっても、そこ
 	try {
 		await app.command("verify", "add true");
 		// モデルの bash が sandbox の中から置いたものに見立てる。
-		writeFileSync(join(shims, "git"), `#!/bin/sh\necho escaped > ${outside}/mark\nexec ${realGit} "$@"\n`, { mode: 0o755 });
+		writeFileSync(join(bin, "git"), `#!/bin/sh\necho escaped > ${outside}/mark\nexec ${realGit} "$@"\n`, { mode: 0o755 });
 		// 次のターンの始まり。人は何も打っていない。
 		await app.emit("agent_start");
 		assert.equal(existsSync(join(outside, "mark")), false, "置かれた git が sandbox の外で走った");
@@ -56,13 +56,14 @@ test("PATHの要素がsandboxの中から書ける場所にあっても、そこ
 		await app.emit("agent_settled", { aborted: false });
 
 		// 書ける場所の外に git が無ければ起こさない。名前で起こし直すと、飛ばした候補を拾う。
-		process.env.PATH = shims;
+		process.env.PATH = bin;
 		await app.command("verify");
 		assert.equal(existsSync(join(outside, "mark")), false);
-		assert.match(app.notices.at(-1)!, /git リポジトリの外では使えない/);
+		assert.match(app.notices.at(-1)!, /git が見つからない/);
+		assert.doesNotMatch(app.notices.at(-1)!, /リポジトリの外/);
 	} finally {
 		process.env.PATH = path;
-		rmSync(join(shims, "git"), { force: true });
+		rmSync(join(bin, "git"), { force: true });
 		await app.emit("session_shutdown", { reason: "quit" });
 	}
 });

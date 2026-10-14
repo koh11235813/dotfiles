@@ -78,6 +78,8 @@ type Verdict =
 const LABEL = { not_run: "未実行", passed: "成功", failed: "失敗", interrupted: "中断" } as const;
 const describe = (verdict: Verdict) => `検証: ${LABEL[verdict.state]}${"reason" in verdict ? ` (${verdict.reason})` : ""}`;
 const fresh = (): Verdict => ({ state: "not_run", reason: "このセッションではまだ確かめていない" });
+/** リポジトリの外とは別の理由。こちらは PATH を直せば使える。 */
+const NO_GIT = "git が見つからない (sandbox の中から書けない場所の PATH に無い)";
 
 export default function (pi: ExtensionAPI) {
 	let verdict = fresh();
@@ -85,12 +87,14 @@ export default function (pi: ExtensionAPI) {
 	let task: { project: Project; start: string | undefined; before: Verdict; fixes: number } | undefined;
 	/** 走っている検証。止める口と、止まり切るのを待つ口。走っていなければ無し。 */
 	let running: { controller: AbortController; done: Promise<void> } | undefined;
+	/** git を拾えないことを、このセッションで知らせたか。 */
+	let warned = false;
 
 	/**
 	 * ファイル状態を取る git の実体。guard が居れば guard に訊く。名前だけで起こすと PATH を探し、PATH の要素が sandbox の中から
-	 * 書ける場所にあると (root の中の `.venv/bin`、mise の shims)、モデルの置いた git がここ (sandbox の外) で走る。
+	 * 書ける場所にあると (root の中の `.venv/bin`、allowWrite で開けた mise の shims)、モデルの置いた git がここ (sandbox の外) で走る。
 	 * 返事が無ければ guard は居ない。sandbox も無いので、名前のまま起こす。
-	 * 「無い」という返事なら起こさず、リポジトリの外と同じに扱う。名前で起こし直すと、guard が飛ばした候補を拾う。
+	 * 「無い」という返事なら起こさない。名前で起こし直すと、guard が飛ばした候補を拾う。
 	 */
 	function gitBinary(): string | undefined {
 		let binary: string | undefined = "git";
@@ -110,6 +114,22 @@ export default function (pi: ExtensionAPI) {
 	/** 登録のある project でだけ出す。無い project で「未実行」を出し続けても、読む人にできることが無い。 */
 	const show = (ctx: ExtensionContext, where: Project | undefined, text = describe(verdict)) => ctx.ui.setStatus("verify", where && registered(where.id).length ? text : undefined);
 
+	/**
+	 * git を拾えないときに、そのことを出して true を返す。黙って抜けると、登録した検証が走らない理由が人に見えない。
+	 * project の鍵は git に訊くので、ここがどの project かは分からない。どこかの project に登録があれば出し、1 つも無ければ出さない。
+	 * notify はセッションに 1 度。agent_start のたびに出すと、直すまで毎ターン警告が積もる。
+	 */
+	function gitMissing(ctx: ExtensionContext): boolean {
+		if (gitBinary()) return false;
+		const any = Object.keys(readStore()?.projects ?? {}).length > 0;
+		ctx.ui.setStatus("verify", any ? `検証: ${LABEL.not_run} (${NO_GIT})` : undefined);
+		if (any && !warned) {
+			warned = true;
+			ctx.ui.notify(`検証: ${LABEL.not_run} (${NO_GIT})。登録した検証コマンドは走らない。`, "warning");
+		}
+		return true;
+	}
+
 	/** 結果を出した後に登録が変わった。verify.json は他のセッションも書くので、覚えずに毎回読む。 */
 	const reregistered = (id: string) => "fingerprint" in verdict && verdict.commands !== JSON.stringify(registered(id));
 	const REREGISTERED: Verdict = { state: "not_run", reason: "確かめた後に登録が変わった" };
@@ -123,7 +143,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		verdict = fresh();
 		task = undefined;
-		show(ctx, project(ctx.cwd));
+		warned = false;
+		if (!gitMissing(ctx)) show(ctx, project(ctx.cwd));
 	});
 
 	// 止まり切るのを待つ。待たずに Pi が終わると、SIGTERM を無視するコマンドに SIGKILL を送る前に手が離れる。
@@ -134,9 +155,10 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", (_event, ctx) => {
 		// agent_start は続行のたびに来る。基準はタスクの最初の 1 回だけ取る。
-		if (task) return;
+		if (task || gitMissing(ctx)) return;
 		const where = project(ctx.cwd);
-		if (!where || !registered(where.id).length) return;
+		// 登録の無い project でも表示は直す。git を拾えなかった間の表示が残る。
+		if (!where || !registered(where.id).length) return show(ctx, where);
 		const start = fingerprint(where.root);
 		expire(where.id, start);
 		show(ctx, where);
@@ -276,6 +298,7 @@ export default function (pi: ExtensionAPI) {
 				if (!running) return ctx.ui.notify("走っている検証は無い。", "info");
 				return running.controller.abort();
 			}
+			if (!gitBinary()) return ctx.ui.notify(`${NO_GIT}。ファイル状態を git から取るので、登録も検証もできない。`, "warning");
 			const where = project(ctx.cwd);
 			if (!where) return ctx.ui.notify("git リポジトリの外では使えない。ファイル状態を git から取るため。", "warning");
 			const commands = registered(where.id);

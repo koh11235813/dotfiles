@@ -11,7 +11,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import type { EditOperations, WriteOperations } from "@earendil-works/pi-coding-agent";
+import { type EditOperations, getAgentDir, type WriteOperations } from "@earendil-works/pi-coding-agent";
 import type { PermissionMode } from "./permissions.ts";
 import { WORKTREES_DIR } from "./worktree.ts";
 
@@ -114,27 +114,25 @@ export const EXTRA_WRITE_PATHS: Array<() => string | undefined> = [
 	// 次に sandbox の外で打つ cargo が実行する。`cargo install` はそのため止まったまま。
 	() => join(homedir(), ".cargo", "registry"),
 	() => join(homedir(), ".cargo", "git"),
-	// `uv python install` / `uv tool install`、pipx の venv、mise の installs。`~/.local/share` ごとは開けない。
-	// 入るのは実行ファイルそのものなので、ここに書けるものは sandbox の外で次に動く道具を差し替えられる。
-	// 入れる作業を通すことと両立しないので、開ける側に倒している (README の「できないこと」)。
-	() => join(homedir(), ".local", "share", "uv"),
-	() => join(homedir(), ".local", "share", "pipx"),
-	() => join(homedir(), ".local", "share", "mise"),
-	// Go の module cache。GOMODCACHE / GOPATH を変えているホストは見ていない。
+	// `~/.local/share/uv`・`pipx`・`mise` は開けない。uv の python と tools、pipx の venv、mise の installs という
+	// 実行ファイルの実体の置き場で、書けると sandbox の外で次に動く道具を差し替えられる。キャッシュは上の `~/.cache` 側にある。
+	// sandbox の中の `uv tool install`・`pipx install`・`mise install` はそのため止まったまま (README)。
+	// Go の module cache と、取得した module を検証する checksum のキャッシュ。どちらも実行ファイルの置き場ではない。
+	// GOMODCACHE / GOPATH を変えているホストは見ていない。
 	() => join(homedir(), "go", "pkg", "mod"),
+	() => join(homedir(), "go", "pkg", "sumdb"),
 	// bun install のキャッシュ。`~/.bun` ごとは開けない (`~/.bun/bin` に bun 自身がある)。
 	() => join(homedir(), ".bun", "install", "cache"),
-	// gh がトークンを更新して書き戻す hosts.yml の置き場。
-	() => join(homedir(), ".config", "gh"),
+	// `~/.config/gh` は開けない。gh の alias はシェルを起こせ、書かれたものは後で sandbox の外で打つ gh が実行する。
 	// chezmoi の状態ファイルだけ。`~/.config/chezmoi` ごとは開けない。chezmoi.toml には hook を書け、
-	// guard 自身が edit / write のたびに sandbox の外で `chezmoi managed` を呼ぶ (index.ts の chezmoiManaged)。
+	// full の guard は edit / write のたびに sandbox の外で `chezmoi managed` を呼び (index.ts の chezmoiManaged)、人の打つ chezmoi も外で走る。
 	() => join(homedir(), ".config", "chezmoi", "chezmoistate.boltdb"),
 ];
 
 /**
  * full 以外で読ませない場所。ファイルでもディレクトリでもよく、無くてもよい。
  * 普通の開発コマンドが読まない認証情報の置き場だけを並べる。`~/.gnupg` (commit の署名)、`~/.config/gh`、
- * `~/.npmrc`、`~/.pi/agent/auth.json`、`.zshenv` 以外の rc は入れていない。
+ * `~/.npmrc`、`.zshenv` 以外の rc は入れていない。
  * sandbox の中の git / gh / npm / シェルの起動がそれを読むので、塞ぐと正当な作業が止まる。
  * `~/.git-credentials` は以前は同じ理由で外していたが、issue #40 で塞ぐと決めた。代わりに、sandbox の中から
  * https で push / fetch するには gh の credential helper など別の手段が要る (README)。
@@ -152,6 +150,10 @@ export const READ_DENIED_PATHS: Array<() => string> = [
 	() => join(homedir(), ".git-credentials"),
 	// PyPI の upload 用トークン。
 	() => join(homedir(), ".pypirc"),
+	// Pi 自身の鍵。以前は「子の Pi を sandbox に入れるなら、子のプロセスには読ませる必要がある」として外していたが、
+	// 子の Pi は sandbox に入れないと決まった。sandbox の中から起こした pi は agent dir に lock を作れず、
+	// 読めても鍵を使えないので (README)、塞いで止まるものは無い。
+	() => join(getAgentDir(), "auth.json"),
 ];
 
 /**
@@ -201,11 +203,15 @@ export function rootExcluded(root: string): "home" | "denied" | undefined {
  * git は gitCommonDir の結果。commit / fetch / worktree 操作が書く .git は、root が linked worktree や
  * リポジトリのサブディレクトリだと root の外にある。
  * extra は人が設定で足した場所 (allowWrite)。表と同じ配列に入れて、無いものと読ませない場所に重なるものを同じ手順で落とす。
- * readonly では足さない。readonly は「どこにも書かせない」で、足すと設定が 1 行あるだけで意味が変わる。
+ * readonly では足さない。readonly で書けるのは一時置き場だけで、足すと設定が 1 行あるだけで意味が変わる。
+ * その一時置き場は、Linux では scratch だけ、macOS では os.tmpdir() (ユーザーごとの `/var/folders/<id>/T`) も。
+ * Apple の mktemp は TMPDIR を見ずにそこへ書くので、scratch だけだと素の `mktemp` が落ちる。Linux の mktemp は TMPDIR を見る。
+ * 揃えて Linux でも開けることはしない。そこには他の Pi セッションの scratch も他のアプリの一時ファイルもあり、
+ * readonly のモデルが書き換えられる場所は要る分より広げない (README)。
  */
 export function writeRoots(mode: Exclude<PermissionMode, "full">, root: string, scratch: string, git?: string, extra: string[] = []): string[] {
 	const paths =
-		mode === "readonly" ? [scratch] : [containsHome(root) ? undefined : root, tmpdir(), git, ...SHARED_TMP_PATHS, ...EXTRA_WRITE_PATHS.map((entry) => entry()), ...extra];
+		mode === "readonly" ? [scratch, process.platform === "darwin" ? tmpdir() : undefined] : [containsHome(root) ? undefined : root, tmpdir(), git, ...SHARED_TMP_PATHS, ...EXTRA_WRITE_PATHS.map((entry) => entry()), ...extra];
 	const found = [...new Set(paths.flatMap((path) => (path && real(path)) || []))].filter((path) => !overlapsDenied(path));
 	// 他の root の中にあるもの (普通のリポジトリの .git など) は重ねて書かない。
 	return found.filter((path) => !found.some((other) => other !== path && within(other, path)));
@@ -360,6 +366,18 @@ function submoduleGitDirs(common: string): string[] {
 }
 
 /**
+ * 一時ディレクトリの中の、Pi 自身のコードのキャッシュ。sandbox の bash に渡す locks に足す (git の規則や説明には使わない)。
+ * Pi は拡張のソースを jiti で変換して `os.tmpdir()/jiti` に置き、次の起動でソースを読み直さずにそれを実行する。
+ * そこは sandbox の外 (Pi のプロセス) で動く guard 自身のコードでもあるので、書けると次の起動から境界ごと差し替えられる。
+ * `node-compile-cache` は Node が同じ使い方をする置き場。一時ディレクトリごと閉じないのは、素の mktemp がそこへ書くため。
+ * 名指しなので、同じ場所にあるほかのアプリの実行物までは塞がない (README)。
+ */
+export function cacheLocks(): Lock[] {
+	const tmp = real(tmpdir()) ?? tmpdir();
+	return ["jiti", "node-compile-cache"].map((name) => ({ path: join(tmp, name), directory: true }));
+}
+
+/**
  * locks の祖先のうち、書ける場所の中にあるディレクトリ。浅い順。書ける場所そのものと、その外は数えない。
  * sandbox はこれを動かせないようにする。直接の親だけだと、その上 (`.git/modules`) を rename して同じ名前で作り直せる。
  */
@@ -434,7 +452,8 @@ export function seatbelt(roots: string[], denied: string[], locks: Lock[] = []):
 		'\t(regex #"^/private/var/tmp/sh-thd-[0-9]+$"))',
 		// roots の再許可より後に置いて勝たせる。照合はパスなので、無い場所も後から作らせない。
 		// 親の unlink (rename を含む) も拒否する。親ごと動かして、同じ名前で作り直す道を塞ぐ。
-		// macOS の実機では確かめていない (README)。
+		// macOS 27.2 で 2026-10-14 に確かめた範囲: この関数の生成したプロファイルを sandbox-exec が受け付け、clone した
+		// ディレクトリへの `mv sub sub2` と `rm -rf sub` が Operation not permitted になる。ほかの版の macOS は見ていない (README)。
 		...(locks.length > 0
 			? [
 					`(deny file-write* ${locks.map((lock) => `(subpath ${JSON.stringify(lock.path)})`).join(" ")})`,
