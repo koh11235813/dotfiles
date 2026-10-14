@@ -6,8 +6,13 @@
    既定の key が全部そろっていれば実ファイルをそのまま返す。toPrettyJson は key を
    並べ替えるので、通すと pi が書くたびに chezmoi diff に順序だけの差分が出る。
    $cur は現在の実ファイル。fresh host (stdin 空) では既定値を出す。
+   skills の "-" は pi の force-exclude。共有の ~/.agents/skills/agmsg は Codex 向けに
+   描かれていて、Pi 向けの ~/.pi/agent/skills/agmsg と同名でぶつかるので外す。
+   "skills/agmsg" のような相対の形は ~/.pi/agent 側にも当たって両方消えるので使わない。
+   実ファイルに skills が既にあるホストでは、ほかの key と同じく実ファイルが勝ち、この除外は入らない
+   (手で足す)。足さなくても使われるのは Pi 向けで、pi が同名の collision を警告するだけ。
 */ -}}
-{{- $defaults := dict "theme" "dark" "defaultProvider" "openrouter" "defaultModel" "deepseek/deepseek-v4.1-flash" -}}
+{{- $defaults := dict "theme" "dark" "defaultProvider" "openrouter" "defaultModel" "deepseek/deepseek-v4.1-flash" "skills" (list "-~/.agents/skills/agmsg") -}}
 {{- $cur := dict -}}
 {{- if .chezmoi.stdin }}{{ $cur = fromJson .chezmoi.stdin }}{{ end -}}
 {{- $missing := false -}}
