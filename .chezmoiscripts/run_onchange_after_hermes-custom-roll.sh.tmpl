@@ -1,0 +1,17 @@
+{{- $hermes := lookPath "hermes" -}}
+{{- if $hermes -}}
+#!/bin/sh
+set -eu
+
+# 本文の変更で再実行される。SOUL.md とは分離し、共有プールだけを正本にする。
+# 対象は chezmoi の配置先の既定プロファイル。呼出元の HERMES_HOME は引き継がない。
+export HERMES_HOME={{ joinPath .chezmoi.destDir ".hermes" | quote }}
+
+personality=$(cat <<'__HERMES_CUSTOM_ROLL__'
+{{ dict "system_prompt" (include "dot_agents/custom-roll/ereshkigal.md" | trimSuffix "\n") | toJson }}
+__HERMES_CUSTOM_ROLL__
+)
+
+{{ $hermes | quote }} config set agent.personalities.custom-roll "$personality" >/dev/null
+{{ $hermes | quote }} config set display.personality custom-roll
+{{- end }}
