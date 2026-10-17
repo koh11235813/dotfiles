@@ -139,7 +139,8 @@
     "agmsg@fujibee-agmsg": true,
     "eli5@claude-community": true,
     "thermos@cursor-plugins": true,
-    "typesafe@typesafe-ai": true
+    "typesafe@typesafe-ai": true,
+    "pstack@cursor-plugins": true
   },
   "extraKnownMarketplaces": {
     "openai-codex": {
@@ -156,8 +157,8 @@
     },
     "cursor-plugins": {
       "source": {
-        "source": "directory",
-        "path": "~/.local/share/cursor-plugins"
+        "source": "github",
+        "repo": "cursor/plugins"
       }
     },
     "typesafe-ai": {

@@ -2,3 +2,5 @@
 .pi/agent/extensions/compactjev.ts
 # scripts/statusline-command.sh に移した。残すと settings.json から参照されない古い版が居座る。
 .claude/statusline-command.sh
+# Claude Code が cursor/plugins を marketplace として直接読めるようになり、変換スクリプトは不要になった。
+.local/bin/cursor-plugins-sync.sh
