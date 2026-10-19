@@ -1,0 +1,12 @@
+# Select with: codex --profile openrouter
+model = "deepseek/deepseek-v4.1-flash-1017"
+model_provider = "openrouter"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+wire_api = "responses"
+
+[model_providers.openrouter.auth]
+command = "sh"
+args = ["-c", "printf '%s\\n' \"$OPENROUTER_API_KEY\""]

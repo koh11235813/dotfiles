@@ -48,9 +48,9 @@ model_verbosity = "medium"
 # Approvals, sandbox, authentication, and project discovery
 ################################################################################
 
-# Interactive work: the agent requests approval only when necessary.
+# Approve for me: route eligible approval requests to automatic review.
 approval_policy = "on-request"
-approvals_reviewer = "user"
+approvals_reviewer = "auto_review"
 # Avoid hidden profile startup effects and the experimental zsh-fork path.
 allow_login_shell = false
 # Allow workspace edits while keeping network and extra roots closed.
