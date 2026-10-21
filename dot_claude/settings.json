@@ -5,8 +5,6 @@
       "Bash(ls:*)",
       "Bash(pwd:*)",
       "Bash(wc:*)",
-      "mcp__codex__codex",
-      "mcp__codex__codex-reply",
       "Skill(codex:setup)",
       "Skill(codex:rescue)",
       "Bash(python3 -m py_compile:*)",
