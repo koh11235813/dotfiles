@@ -4,3 +4,5 @@
 .claude/statusline-command.sh
 # Claude Code が cursor/plugins を marketplace として直接読めるようになり、変換スクリプトは不要になった。
 .local/bin/cursor-plugins-sync.sh
+# codex MCP をやめた。Claude Code は codex plugin、hermes は同梱の codex スキル、pi は codex 拡張で委譲する。
+.claude/scripts/codex-mcp-bridge.mjs
