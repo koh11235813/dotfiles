@@ -4,7 +4,7 @@
  * ../verify/run.ts を import しないのは、あちらがシェルを通し、stdout と stderr を混ぜ、stdin を閉じたまま起こすため。
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export interface CodexResult {
 	ended: "exited" | "timed_out" | "cancelled";
@@ -27,10 +27,32 @@ const KILL_GRACE_MS = 2000;
 const DRAIN_GRACE_MS = 250;
 
 /** もう居ない (ESRCH) のは目的を果たした後なので、失敗は捨てる。タイマーの中で投げると Pi ごと落ちる。 */
-function signalGroup(child: ChildProcess, signal: NodeJS.Signals) {
+function signal(pid: number, name: NodeJS.Signals) {
 	try {
-		process.kill(-child.pid!, signal);
+		process.kill(pid, name);
 	} catch {}
+}
+
+/**
+ * root の子孫の pid。codex はコマンドを別のセッション (setsid) で起こすので、プロセスグループへのシグナルは届かない。親子の糸を辿る。
+ * codex が死ぬと子孫は init に付け替えられて糸が切れるので、codex が生きているうちに取る。
+ * ps を名前で探さないのは、PATH にモデルが書ける場所があると、そこに置かれた ps が Pi の権限で走るため。
+ */
+function descendants(root: number): number[] {
+	const listed = spawnSync("/bin/ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" }).stdout ?? "";
+	const children = new Map<number, number[]>();
+	for (const row of listed.split("\n")) {
+		const [pid, ppid] = row.trim().split(/\s+/).map(Number);
+		if (pid > 0 && ppid > 0) children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+	}
+	const found: number[] = [];
+	for (let queue = [root]; queue.length; ) {
+		for (const pid of children.get(queue.shift()!) ?? []) {
+			found.push(pid);
+			queue.push(pid);
+		}
+	}
+	return found;
 }
 
 function describeFailure(event: Record<string, any>): string {
@@ -63,11 +85,22 @@ export function runCodex(binary: string, args: string[], options: { cwd: string;
 				result.message = event.item.text.length > MAX_MESSAGE_CHARS ? `${event.item.text.slice(0, MAX_MESSAGE_CHARS)}\n[truncated]` : event.item.text;
 			}
 		};
+		/** codex のグループと、別のセッションに出た子孫の 1 つずつ。 */
+		const strike = (pids: Iterable<number>, name: NodeJS.Signals) => {
+			signal(-child.pid!, name);
+			for (const pid of pids) signal(pid, name);
+		};
 		const stop = (cause: CodexResult["ended"]) => {
 			if (result.ended !== "exited") return;
 			result.ended = cause;
-			signalGroup(child, "SIGTERM");
-			timers.push(setTimeout(() => signalGroup(child, "SIGKILL"), KILL_GRACE_MS));
+			const seen = new Set(descendants(child.pid!));
+			strike(seen, "SIGTERM");
+			// finish で消さない (timers に入れない)。codex が TERM ですぐ死んで close が来ても、TERM を無視する子孫には KILL を届ける。
+			// unref するので、返った後にこのタイマーが Pi の終了を引き留めることはない。
+			setTimeout(() => {
+				for (const pid of descendants(child.pid!)) seen.add(pid);
+				strike(seen, "SIGKILL");
+			}, KILL_GRACE_MS).unref();
 		};
 		const cancel = () => stop("cancelled");
 		const finish = (code: number | null, error?: Error) => {
@@ -75,6 +108,10 @@ export function runCodex(binary: string, args: string[], options: { cwd: string;
 			finished = true;
 			for (const timer of timers) clearTimeout(timer);
 			options.signal?.removeEventListener("abort", cancel);
+			// close を待たずに返るとき、パイプを握った子孫が居るとハンドルが残る。close の後に呼んでも害は無い。
+			child.stdin!.destroy();
+			child.stdout!.destroy();
+			child.stderr!.destroy();
 			if (pending.length) handle(pending.toString("utf8"));
 			result.code = code;
 			// 文字列にするのは最後だけ。Buffer のまま切れば、マルチバイト文字の途中に当たっても壊れた文字が残らない。
@@ -102,9 +139,10 @@ export function runCodex(binary: string, args: string[], options: { cwd: string;
 		child.stdin!.on("error", () => {});
 		child.stdin!.end(options.prompt);
 		child.on("error", (error) => finish(null, error));
-		// codex が終わっても、残った子がパイプを握っていると close が来ない。グループを抜けた子孫には SIGKILL も届かないので、待つのは少しだけ。
+		// codex が終わっても、残った子がパイプを握っていると close が来ない。ここではもう子孫の糸を辿れない (init に付け替えられた) ので、
+		// グループを抜けた子孫は止められない。待つのは少しだけ。
 		child.on("exit", (code) => {
-			signalGroup(child, "SIGKILL");
+			signal(-child.pid!, "SIGKILL");
 			timers.push(setTimeout(() => finish(code), DRAIN_GRACE_MS));
 		});
 		child.on("close", (code) => finish(code));

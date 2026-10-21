@@ -91,6 +91,7 @@ export default function (pi: ExtensionAPI) {
 	/** thread ごとの直列化。同じ thread を 2 つの codex が同時に書くと、履歴が混ざる。 */
 	const queues = new Map<string, Promise<void>>();
 	const running = new Set<{ controller: AbortController; done: Promise<unknown> }>();
+	let shuttingDown = false;
 
 	function find(ctx: ExtensionContext, threadId: string): Thread | undefined {
 		const known = threads.get(threadId);
@@ -105,6 +106,8 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function launch(settings: Omit<Thread, "threadId">, prompt: string, signal: AbortSignal | undefined, resumeId?: string) {
+		// 並んでいた codex_reply は、前の 1 つが shutdown で止められた後に順番が来る。ここで断らないと、止めた後に新しく起きる。
+		if (shuttingDown) throw new Error("codex: cancelled (Pi is shutting down)");
 		const controller = new AbortController();
 		const forward = () => controller.abort();
 		signal?.addEventListener("abort", forward);
@@ -143,7 +146,9 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// 止まり切るのを待つ。待たずに Pi が終わると、SIGTERM を無視する codex に SIGKILL を送る前に手が離れる。
+	// 戻さない。shutdown の後、Pi は拡張を読み込み直した別の runtime で続ける (dist/core/agent-session-runtime.js の teardownCurrent)。
 	pi.on("session_shutdown", async () => {
+		shuttingDown = true;
 		for (const handle of running) handle.controller.abort();
 		await Promise.all([...running].map((handle) => handle.done));
 	});
@@ -180,9 +185,9 @@ export default function (pi: ExtensionAPI) {
 			const thread = find(ctx, params.threadId);
 			if (!thread) throw new Error(`codex_reply: unknown threadId ${params.threadId}. Only threads started by the codex tool in this session can be continued.`);
 			const { threadId, ...settings } = thread;
-			// 枝から引いた cwd も確かめ直す。セッションは別の cwd で開き直せる。
-			workdir(ctx.cwd, settings.cwd);
-			return serialized(threadId, () => launch(settings, params.prompt, signal, threadId));
+			// 枝から引いた cwd も確かめ直す。セッションは別の cwd で開き直せる。確かめるのは順番が来て起こす直前で、起こすのは解いた後のパス。
+			// 並ぶ前に確かめると、待っている間にディレクトリを外への symlink に差し替えられる。
+			return serialized(threadId, async () => launch({ ...settings, cwd: workdir(ctx.cwd, settings.cwd) }, params.prompt, signal, threadId));
 		},
 	});
 }

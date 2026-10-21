@@ -14,6 +14,7 @@ const fake = join(base, "codex");
 /**
  * 偽の codex。引数・cwd・stdin・pid を FAKE_CODEX_DIR に書き、そこにある out.jsonl を出して code で終わる。
  * delay があればその秒数待ってから出す。hang があれば、子を 1 つ残して返らない (本物が考えている状態)。
+ * escape があれば、別のセッションに出た子孫 (本物がコマンドを起こすときと同じ) を 1 つ残す。stdout を握ったまま。
  */
 writeFileSync(
 	fake,
@@ -26,6 +27,10 @@ printf '%s\\n' "$@" > "$d/args"
 cat > "$d/stdin"
 echo "2026-01-01 ERROR codex_core: unrelated log line" >&2
 [ -f "$d/delay" ] && sleep "$(cat "$d/delay")"
+if [ -f "$d/escape" ]; then
+	perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", "$ARGV[0].tmp"); print $f $$; close $f; rename("$ARGV[0].tmp", $ARGV[0]); sleep 60' "$d/escaped" &
+	while [ ! -s "$d/escaped" ]; do sleep 0.01; done
+fi
 if [ -f "$d/hang" ]; then
 	head -c 60 "$d/out.jsonl"; sleep 0.1; tail -c +61 "$d/out.jsonl"
 	sleep 30 & echo $! > "$d/child"
@@ -39,7 +44,16 @@ exit "$(cat "$d/code" 2>/dev/null || echo 0)"
 chmodSync(fake, 0o755);
 process.env.PI_CODEX_BIN = fake;
 
-after(() => rmSync(base, { recursive: true, force: true }));
+/** 失敗したテストが残した、グループの外の子孫。 */
+const escaped: number[] = [];
+after(() => {
+	for (const pid of escaped) {
+		try {
+			process.kill(pid, "SIGKILL");
+		} catch {}
+	}
+	rmSync(base, { recursive: true, force: true });
+});
 
 const THREAD = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
 const line = (event: unknown) => `${JSON.stringify(event)}\n`;
@@ -50,13 +64,14 @@ const COMPLETED = line({ type: "turn.completed", usage: { input_tokens: 1, outpu
 
 let count = 0;
 /** 1 回分の偽 codex の置き場。out.jsonl の中身と終了コードを決めておく。 */
-function scenario(out: string, options: { code?: number; hang?: boolean; delay?: number } = {}) {
+function scenario(out: string, options: { code?: number; hang?: boolean; delay?: number; escape?: boolean } = {}) {
 	const dir = join(base, `run-${++count}`);
 	mkdirSync(dir);
 	writeFileSync(join(dir, "out.jsonl"), out);
 	if (options.code !== undefined) writeFileSync(join(dir, "code"), String(options.code));
 	if (options.hang) writeFileSync(join(dir, "hang"), "");
 	if (options.delay) writeFileSync(join(dir, "delay"), String(options.delay));
+	if (options.escape) writeFileSync(join(dir, "escape"), "");
 	process.env.FAKE_CODEX_DIR = dir;
 	const read = (name: string) => readFileSync(join(dir, name), "utf8");
 	return { dir, read, args: () => read("args").trimEnd().split("\n"), log: () => (existsSync(join(dir, "log")) ? read("log").trim().split("\n") : []) };
@@ -253,4 +268,88 @@ test("session_shutdown は走っている codex を止め、止まり切るの�
 	await app.emit("session_shutdown", { reason: "quit" });
 	assert.equal(alive(Number(fakeRun.read("pid"))), false);
 	assert.match(String(await pending), /cancelled/);
+});
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function until(condition: () => boolean, limitMs = 3000) {
+	for (const started = Date.now(); !condition(); await pause(10)) {
+		if (Date.now() - started > limitMs) return false;
+	}
+	return true;
+}
+
+test("並んでいる間に cwd が外への symlink に差し替えられたら、codex_reply は起こさずに断る", async () => {
+	mkdirSync(join(work, "swap"));
+	scenario(STARTED + answerLine("one") + COMPLETED);
+	const { call } = session();
+	await call("codex", { prompt: "first", cwd: "swap" });
+
+	const fakeRun = scenario(answerLine("next") + COMPLETED, { delay: 0.3 });
+	const first = call("codex_reply", { threadId: THREAD, prompt: "a" });
+	assert.ok(await until(() => fakeRun.log().length > 0));
+	const second = call("codex_reply", { threadId: THREAD, prompt: "b" });
+	rmSync(join(work, "swap"), { recursive: true });
+	mkdirSync(join(base, "outside"));
+	symlinkSync(join(base, "outside"), join(work, "swap"));
+
+	await first;
+	await assert.rejects(second, /must be inside the working directory/);
+	assert.equal(fakeRun.log().filter((entry) => entry.startsWith("start")).length, 1);
+});
+
+test("session_shutdown の後は、並んでいた codex_reply も起こさない", async () => {
+	scenario(STARTED + answerLine("one") + COMPLETED);
+	const { app, call } = session();
+	await call("codex", { prompt: "first" });
+
+	const fakeRun = scenario("", { hang: true });
+	const first = call("codex_reply", { threadId: THREAD, prompt: "a" }).catch((error: Error) => error);
+	assert.ok(await until(() => existsSync(join(fakeRun.dir, "child"))));
+	const second = call("codex_reply", { threadId: THREAD, prompt: "b" }).catch((error: Error) => error);
+	await app.emit("session_shutdown", { reason: "quit" });
+
+	assert.match(String(await first), /cancelled/);
+	assert.match(String(await Promise.race([second, pause(1000).then(() => "still running")])), /cancelled \(Pi is shutting down\)/);
+	assert.equal(fakeRun.log().filter((entry) => entry.startsWith("start")).length, 1);
+});
+
+test("中断すると、別のセッションに出た子孫も止める", async () => {
+	const fakeRun = scenario(STARTED, { hang: true, escape: true });
+	const { call } = session();
+	const controller = new AbortController();
+	const pending = call("codex", { prompt: "x" }, controller.signal);
+	assert.ok(await until(() => existsSync(join(fakeRun.dir, "child")) && existsSync(join(fakeRun.dir, "escaped"))));
+	const descendant = Number(fakeRun.read("escaped"));
+	escaped.push(descendant);
+	controller.abort();
+	await assert.rejects(pending, /cancelled/);
+	assert.ok(await until(() => !alive(descendant), 1000), "the descendant in its own session survived");
+});
+
+test("timeout でも、別のセッションに出た子孫を止める", async () => {
+	const fakeRun = scenario(STARTED, { hang: true, escape: true });
+	const { call } = session();
+	process.env.PI_CODEX_TIMEOUT_MS = "500";
+	try {
+		await assert.rejects(call("codex", { prompt: "x" }), /timed out/);
+	} finally {
+		delete process.env.PI_CODEX_TIMEOUT_MS;
+	}
+	const descendant = Number(fakeRun.read("escaped"));
+	escaped.push(descendant);
+	assert.ok(await until(() => !alive(descendant), 1000), "the descendant in its own session survived");
+});
+
+test("codex が終わった後もパイプを握る子孫が居ても、パイプのハンドルを残さない", async () => {
+	const pipes = () => process.getActiveResourcesInfo().filter((name) => name === "PipeWrap").length;
+	const before = pipes();
+	const fakeRun = scenario(STARTED + answerLine("OK") + COMPLETED, { escape: true });
+	const { call } = session();
+	const result = await call("codex", { prompt: "x" });
+	escaped.push(Number(fakeRun.read("escaped")));
+
+	assert.equal(result.content[0].text, `OK\n\nthreadId: ${THREAD}`);
+	assert.ok(alive(Number(fakeRun.read("escaped"))), "the descendant should still hold the pipe");
+	await pause(50);
+	assert.equal(pipes(), before);
 });
