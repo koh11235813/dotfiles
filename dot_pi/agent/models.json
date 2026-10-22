@@ -36,7 +36,7 @@
             ]
         },
         "project-maya": {
-            "baseUrl": "http://133.15.70.55:8080/v1",
+            "baseUrl": "http://127.0.0.1:8080/v1",
             "api": "openai-completions",
             "apiKey": "${MAYA_API_KEY}",
             "models": [
