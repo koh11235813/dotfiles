@@ -142,25 +142,29 @@
       "source": {
         "source": "github",
         "repo": "openai/codex-plugin-cc"
-      }
+      },
+      "autoUpdate": true
     },
     "claude-community": {
       "source": {
         "source": "github",
         "repo": "anthropics/claude-plugins-community"
-      }
+      },
+      "autoUpdate": true
     },
     "cursor-plugins": {
       "source": {
         "source": "github",
         "repo": "cursor/plugins"
-      }
+      },
+      "autoUpdate": true
     },
     "typesafe-ai": {
       "source": {
         "source": "github",
         "repo": "typesafe-ai/skills"
-      }
+      },
+      "autoUpdate": true
     }
   },
   "language": "Japanese",
