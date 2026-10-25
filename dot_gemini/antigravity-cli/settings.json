@@ -51,6 +51,9 @@
       "command(apt search)",
       "command(.venv/bin/python3)",
       "command(.venv/bin/pip)",
+      "read_file(/Users/kinoko/.agents)",
+      "read_file(/home/kinoko/.agents)",
+      "command(regex:(?:(?:(?:ba|z)?sh|node|bun|deno|tsx)(?:[ \\t]+-[A-Za-z0-9-]+)*[ \\t]+)?(?:~|\\$HOME|/Users/kinoko|/home/kinoko)/\\.agents(?:/[A-Za-z0-9_][A-Za-z0-9_.+-]*)*(?:[ \\t]+[^;&|`$()<>\\r\\n]*)?)",
       "command(bash ~/.agents/skills/agmsg/scripts/whoami.sh \"$PWD\" antigravity)",
       "command(bash ~/.agents/skills/agmsg/scripts/delivery.sh set turn antigravity \"$PWD\")",
       "command(bash ~/.agents/skills/agmsg/scripts/inbox.sh)"
