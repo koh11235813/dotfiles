@@ -22,6 +22,9 @@ Before implementing:
 - No abstractions for single-use code.
 - No "flexibility" or "configurability" that wasn't requested.
 - No error handling for impossible scenarios.
+- Validate external input once at the trust boundary and pass typed, normalized values inward. Do not re-check the same value in inner layers.
+- Do not add handling for speculative concurrency, security, or failure cases the task does not require. If you think one is real, leave it out and list it in the final reply: the concrete failure, how it would occur, and how much code the fix needs.
+- When an instruction file or design doc conflicts with how existing code does something, follow the code's conventions, unless the doc marks it as a migration target or the user asked for the change. List every conflict you found in the final reply.
 - If you write 200 lines and it could be 50, rewrite it.
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
