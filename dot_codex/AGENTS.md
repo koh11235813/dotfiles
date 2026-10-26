@@ -8,6 +8,9 @@
 - Require explicit authorization before destructive or irreversible actions, including deletion, migrations, dependency upgrades, infrastructure changes, and publishing; use authorization already given without asking again.
 - Never force-push. Treat `--force`, `--force-with-lease`, `--force-if-includes`, `--mirror`, and equivalent forms as prohibited regardless of argument order or aliases.
 - Keep changes surgical: touch only what the task requires; when staging, include only requested files. Preserve surrounding style and do not add unrequested features or abstractions.
+- Validate external input once at the trust boundary and pass typed, normalized values inward. Do not re-check the same value in inner layers.
+- Do not add handling for speculative concurrency, security, or failure cases the task does not require. If you think one is real, leave it out and list it in the final reply: the concrete failure, how it would occur, and how much code the fix needs.
+- When an instruction file or design doc conflicts with how existing code does something, follow the code's conventions, unless the doc marks it as a migration target or the user asked for the change. List every conflict you found in the final reply.
 - Remove imports or helpers made unused by your edits; leave pre-existing dead code and unrelated changes in place, and mention them when relevant.
 - Define completion before coding. Run the checks that materially validate the requested change, fix failures caused by it, and rerun affected checks. Report actual results.
 - Keep progress updates concise: state findings, decisions, changes, blockers, and verification results.
