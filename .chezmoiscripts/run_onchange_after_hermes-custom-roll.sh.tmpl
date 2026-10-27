@@ -12,6 +12,6 @@ personality=$(cat <<'__HERMES_CUSTOM_ROLL__'
 __HERMES_CUSTOM_ROLL__
 )
 
-{{ $hermes | quote }} config set agent.personalities.custom-roll "$personality" >/dev/null
+{{ $hermes | quote }} config set personalities.custom-roll "$personality" >/dev/null
 {{ $hermes | quote }} config set display.personality custom-roll
 {{- end }}
