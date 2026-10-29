@@ -165,6 +165,13 @@
         "repo": "typesafe-ai/skills"
       },
       "autoUpdate": true
+    },
+    "i-have-adhd": {
+      "source": {
+        "source": "github",
+        "repo": "koh11235813/i-have-adhd"
+      },
+      "autoUpdate": true
     }
   },
   "language": "Japanese",
