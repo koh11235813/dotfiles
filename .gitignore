@@ -11,7 +11,8 @@ dot_config/zed/conversations/
 dot_config/zed/themes/
 
 # local config
-.claude
+.claude/*
+!.claude/skills/
 .codex
 .opencode
 .hermes
