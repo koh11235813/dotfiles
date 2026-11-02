@@ -1,0 +1,67 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // chezmoi 管理の ~/.config/opencode/opencode.jsonc。dot_claude / dot_codex に対応する
+  // opencode 側の置き所。旧設定 (V1 形の mcp 直置き) を
+  // opencode.ai/v2/docs/migrate-v1 に沿ってネイティブ V2 形に移し替えてある。
+  // claude (dot_claude/settings.json) の hooks / custom-roll に寄せる仕掛けは
+  // plugins/ 配下の .ts にあり、対応関係はそれぞれの冒頭コメントに書いた。
+
+  // ===== MCP =====
+  // codex MCP は opencode 側では起動直後に落ちて接続も失敗する
+  // (log: "MCP server process exited with code 1: Error: stdin is not a terminal"、2026-11-02 実測)。
+  // .chezmoiremove が codex MCP 全廃を既定しているので、委譲は各 CLI 専用の経路に任せる。
+  "mcp": {
+    "servers": {
+      "context7": {
+        "type": "local",
+        "command": ["npx", "-y", "@upstash/context7-mcp", "--api-key", "{env:CONTEXT7_API_KEY}"]
+      }
+    }
+  },
+
+  // ===== permissions =====
+  // claude (dot_claude/settings.json の permissions.allow / ask) の許可リストを V2 の
+  // 順序付きリストに写したもの (権限は claude と同じ、という要件の実装)。
+  //   `Bash(cmd:*)` -> { action: "shell", resource: "cmd *" }
+  //   (` *` は引数なしの cmd 自体にも一致する。V2 の末尾を引数なしも拾う規則に合わせる)
+  // action 名は V1 の bash -> shell。
+  // opencode は基本ポリシー (全許可 + .env 読みは訊く) が最初に敷かれ、あとから積む
+  // Global / agent ルールが上書きする。今のところ deny を足していないので挙動は基本
+  // ポリシーと同じ。このリストは、今後 deny の階層を足すときの下敷きと、
+  // claude と同じ権限姿勢を一枚に記録するためのもの。
+  "permissions": [
+    // --- claude の allow 一覧を順に写す ---
+    { "action": "shell", "resource": "tree *", "effect": "allow" },
+    { "action": "shell", "resource": "ls *", "effect": "allow" },
+    { "action": "shell", "resource": "pwd *", "effect": "allow" },
+    { "action": "shell", "resource": "wc *", "effect": "allow" },
+    { "action": "shell", "resource": "grep *", "effect": "allow" },
+    { "action": "shell", "resource": "rg *", "effect": "allow" },
+    { "action": "shell", "resource": "find *", "effect": "allow" },
+    { "action": "shell", "resource": "awk *", "effect": "allow" },
+    { "action": "shell", "resource": "read *", "effect": "allow" },
+    { "action": "shell", "resource": "git ls-tree *", "effect": "allow" },
+    { "action": "shell", "resource": "git status *", "effect": "allow" },
+    { "action": "shell", "resource": "git log *", "effect": "allow" },
+    { "action": "shell", "resource": "git show *", "effect": "allow" },
+    { "action": "shell", "resource": "git pull *", "effect": "allow" },
+    { "action": "shell", "resource": "git push *", "effect": "allow" },
+    { "action": "shell", "resource": ".venv/bin/python3 *", "effect": "allow" },
+    { "action": "shell", "resource": ".venv/bin/pip list *", "effect": "allow" },
+    { "action": "shell", "resource": "uv run python3 *", "effect": "allow" },
+    { "action": "shell", "resource": "uv run *", "effect": "allow" },
+    { "action": "shell", "resource": "uv sync *", "effect": "allow" },
+    { "action": "shell", "resource": "pytest *", "effect": "allow" },
+    { "action": "shell", "resource": "PYTHONPATH=src:$PYTHONPATH uv run python3 *", "effect": "allow" },
+    // claude 側の json が二重エスケープして持っていた1件を、本来の文字列に戻して置く
+    { "action": "shell", "resource": "xargs -I {} sh -c 'echo \"=== {} ===\" && head -20 \"{}\"'", "effect": "allow" },
+    { "action": "shell", "resource": "pacman -Q *", "effect": "allow" },
+    { "action": "shell", "resource": "apt search *", "effect": "allow" },
+    // claude の ask 一覧
+    { "action": "shell", "resource": "pacman -S *", "effect": "ask" },
+    // skill: claude は Skill(codex:setup) / Skill(codex:rescue) の2件だけ allow している
+    { "action": "skill", "resource": "codex:setup", "effect": "allow" },
+    { "action": "skill", "resource": "codex:rescue", "effect": "allow" }
+  ]
+}
