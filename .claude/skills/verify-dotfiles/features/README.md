@@ -30,6 +30,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 | Feature | Covers | Reach for it when you changed |
 |---|---|---|
 | [Per-host ignore matrix](./host-ignore-matrix.md) | Which directories land on Arch, Lab-Arch, other Linux, and macOS | `.chezmoiignore.tmpl`, or adding anything under `dot_config/` |
-| [Claude hooks](./claude-hooks.md) | `settings.json` wiring, the NG check, and the model-state hook chain, run from the rendered home | `dot_claude/settings.json`, `dot_claude/hooks/`, `dot_claude/scripts/`, `dot_claude/prompts/` |
+| [Claude hooks](./claude-hooks.md) | `settings.json` wiring, the NG check, and the model-state hook chain, run from the rendered home | `dot_claude/settings.json`, `dot_claude/hooks/`, `.chezmoitemplates/ng-patterns.tsv`, `dot_claude/scripts/`, `dot_claude/prompts/` |
 | [Modify templates](./modify-templates.md) | Pi and Codex keep host-owned keys over an existing file and fill defaults on a fresh host | `dot_pi/agent/modify_settings.json`, `dot_codex/modify_private_config.toml` |
 | [Pi extensions](./pi-extensions.md) | The extension test suite, run from the rendered home | `dot_pi/agent/extensions/`, `dot_pi/agent/tests/` |
+| [opencode config](./opencode.md) | The opencode global config, its three hook plugins, and the shared NG pattern TSV, driven from the rendered home | `dot_config/opencode/**`, `.chezmoitemplates/ng-patterns.tsv`, `dot_claude/hooks/ng-patterns.tsv.tmpl` |
