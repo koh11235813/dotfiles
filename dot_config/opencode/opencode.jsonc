@@ -21,45 +21,55 @@
   },
 
   // ===== permissions =====
-  // claude (dot_claude/settings.json の permissions.allow / ask) の許可リストを V2 の
-  // 順序付きリストに写したもの (権限は claude と同じ、という要件の実装)。
-  //   `Bash(cmd:*)` -> { action: "shell", resource: "cmd *" }
-  //   (` *` は引数なしの cmd 自体にも一致する。V2 の末尾を引数なしも拾う規則に合わせる)
-  // action 名は V1 の bash -> shell。
-  // opencode は基本ポリシー (全許可 + .env 読みは訊く) が最初に敷かれ、あとから積む
-  // Global / agent ルールが上書きする。今のところ deny を足していないので挙動は基本
-  // ポリシーと同じ。このリストは、今後 deny の階層を足すときの下敷きと、
-  // claude と同じ権限姿勢を一枚に記録するためのもの。
+  // opencode には OS サンドボックスがなく、allow したコマンドはユーザの全権限で走る。
+  // codex のように「隔離の中で緩く許す」形が取れないので、allow は読むだけのコマンドに絞り、
+  // 残りは訊く側へ倒す。find / awk / git pull / git push / python / uv / pytest / xargs を
+  // 外したのは、どれも実行やファイル変更に届くから。
+  // リストは後勝ちなので、広い ask -> allow -> その allow に潜む書き込みの ask -> deny の順に積む。
+  // ` *` で終わるパターンは引数なしのコマンドにも一致する。
   "permissions": [
-    // --- claude の allow 一覧を順に写す ---
+    { "action": "shell", "resource": "*", "effect": "ask" },
+
     { "action": "shell", "resource": "tree *", "effect": "allow" },
     { "action": "shell", "resource": "ls *", "effect": "allow" },
     { "action": "shell", "resource": "pwd *", "effect": "allow" },
     { "action": "shell", "resource": "wc *", "effect": "allow" },
     { "action": "shell", "resource": "grep *", "effect": "allow" },
     { "action": "shell", "resource": "rg *", "effect": "allow" },
-    { "action": "shell", "resource": "find *", "effect": "allow" },
-    { "action": "shell", "resource": "awk *", "effect": "allow" },
     { "action": "shell", "resource": "read *", "effect": "allow" },
+    { "action": "shell", "resource": "cat *", "effect": "allow" },
+    { "action": "shell", "resource": "head *", "effect": "allow" },
+    { "action": "shell", "resource": "tail *", "effect": "allow" },
+    { "action": "shell", "resource": "cut *", "effect": "allow" },
+    { "action": "shell", "resource": "which *", "effect": "allow" },
+    { "action": "shell", "resource": "stat *", "effect": "allow" },
     { "action": "shell", "resource": "git ls-tree *", "effect": "allow" },
     { "action": "shell", "resource": "git status *", "effect": "allow" },
     { "action": "shell", "resource": "git log *", "effect": "allow" },
     { "action": "shell", "resource": "git show *", "effect": "allow" },
-    { "action": "shell", "resource": "git pull *", "effect": "allow" },
-    { "action": "shell", "resource": "git push *", "effect": "allow" },
-    { "action": "shell", "resource": ".venv/bin/python3 *", "effect": "allow" },
+    { "action": "shell", "resource": "git diff *", "effect": "allow" },
     { "action": "shell", "resource": ".venv/bin/pip list *", "effect": "allow" },
-    { "action": "shell", "resource": "uv run python3 *", "effect": "allow" },
-    { "action": "shell", "resource": "uv run *", "effect": "allow" },
-    { "action": "shell", "resource": "uv sync *", "effect": "allow" },
-    { "action": "shell", "resource": "pytest *", "effect": "allow" },
-    { "action": "shell", "resource": "PYTHONPATH=src:$PYTHONPATH uv run python3 *", "effect": "allow" },
-    // claude 側の json が二重エスケープして持っていた1件を、本来の文字列に戻して置く
-    { "action": "shell", "resource": "xargs -I {} sh -c 'echo \"=== {} ===\" && head -20 \"{}\"'", "effect": "allow" },
     { "action": "shell", "resource": "pacman -Q *", "effect": "allow" },
     { "action": "shell", "resource": "apt search *", "effect": "allow" },
-    // claude の ask 一覧
-    { "action": "shell", "resource": "pacman -S *", "effect": "ask" },
+
+    // 読むだけのコマンドでも、これらの形ではファイルを書くか別のプログラムを起動する。
+    // `*>*` は文字列の照合なので 2>/dev/null や引用符の中の > でも訊く側へ倒れる。
+    { "action": "shell", "resource": "*>*", "effect": "ask" },
+    { "action": "shell", "resource": "* --output*", "effect": "ask" },
+    { "action": "shell", "resource": "rg * --pre*", "effect": "ask" },
+    { "action": "shell", "resource": "rg --pre*", "effect": "ask" },
+    { "action": "shell", "resource": "tree * -o*", "effect": "ask" },
+    { "action": "shell", "resource": "tree -o*", "effect": "ask" },
+    // read ツールの .env 確認を、cat や rg で素通りさせない。
+    { "action": "shell", "resource": "*.env*", "effect": "ask" },
+
+    // force push は履歴を失うので確認の対象にもしない。deny は最終で plugin の hook も通らない。
+    { "action": "shell", "resource": "git push *--force*", "effect": "deny" },
+    { "action": "shell", "resource": "git push *--mirror*", "effect": "deny" },
+    { "action": "shell", "resource": "git push -f*", "effect": "deny" },
+    { "action": "shell", "resource": "git push * -f*", "effect": "deny" },
+    { "action": "shell", "resource": "git push * +*", "effect": "deny" },
+
     // skill: claude は Skill(codex:setup) / Skill(codex:rescue) の2件だけ allow している
     { "action": "skill", "resource": "codex:setup", "effect": "allow" },
     { "action": "skill", "resource": "codex:rescue", "effect": "allow" }
