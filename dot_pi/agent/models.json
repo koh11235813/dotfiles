@@ -46,6 +46,18 @@
                     "contextWindow": 128000
                 }
             ]
+        },
+        "arch": {
+            "baseUrl": "http://127.0.0.1:4080/v1",
+            "api": "openai-completions",
+            "apiKey": "arch",
+            "models": [
+                {
+                    "id": "deepseek-v4.1-flash",
+                    "reasoning": true,
+                    "contextWindow": 262144
+                }
+            ]
         }
     }
 }
