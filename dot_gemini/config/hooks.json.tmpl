@@ -1,0 +1,67 @@
+{
+  "custom-roll": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "~/.gemini/config/scripts/custom-roll.py",
+        "timeout": 5
+      }
+    ]
+  },
+  "plan-report": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "~/.gemini/config/scripts/plan-report.py",
+        "timeout": 5
+      }
+    ]
+  }{{ if eq .chezmoi.os "darwin" }},
+  "orca-status": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "/bin/sh -c 'if [ -f '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -r '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -x '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ]; then ORCA_ANTIGRAVITY_EVENT='\\''PreInvocation'\\'' /bin/sh '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\''; else { command -p cat 2>/dev/null || cat; } >/dev/null 2>&1 || :; fi'",
+        "timeout": 10
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "/bin/sh -c 'if [ -f '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -r '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -x '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ]; then ORCA_ANTIGRAVITY_EVENT='\\''PostInvocation'\\'' /bin/sh '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\''; else { command -p cat 2>/dev/null || cat; } >/dev/null 2>&1 || :; fi'",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "/bin/sh -c 'if [ -f '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -r '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -x '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ]; then ORCA_ANTIGRAVITY_EVENT='\\''Stop'\\'' /bin/sh '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\''; else { command -p cat 2>/dev/null || cat; } >/dev/null 2>&1 || :; fi'",
+        "timeout": 10
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh -c 'if [ -f '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -r '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -x '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ]; then ORCA_ANTIGRAVITY_EVENT='\\''PreToolUse'\\'' /bin/sh '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\''; else printf '\\''%s\\n'\\'' '\\''{\"decision\":\"ask\"}'\\''; { command -p cat 2>/dev/null || cat; } >/dev/null 2>&1 || :; fi'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh -c 'if [ -f '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -r '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ] && [ -x '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\'' ]; then ORCA_ANTIGRAVITY_EVENT='\\''PostToolUse'\\'' /bin/sh '\\''/Users/kinoko/.orca/agent-hooks/antigravity-hook.sh'\\''; else { command -p cat 2>/dev/null || cat; } >/dev/null 2>&1 || :; fi'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }{{ end }}
+}
