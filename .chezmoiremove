@@ -6,3 +6,9 @@
 .local/bin/cursor-plugins-sync.sh
 # codex MCP をやめた。Claude Code は codex plugin、hermes は同梱の codex スキル、pi は codex 拡張で委譲する。
 .claude/scripts/codex-mcp-bridge.mjs
+# PLaMo 翻訳の試験（PR #69、不採用で閉じた）の branch から apply すると置かれる。main の source には無い。
+.hermes/README.md
+.hermes/custom-roll
+.hermes/plugins/plamo-translate
+.hermes/tests/smoke_plamo.py
+.hermes/tests/test_plamo_translate.py
