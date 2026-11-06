@@ -1,0 +1,6 @@
+name: plamo-translate
+version: 0.1.0
+description: Translate final English replies to Japanese using a loopback PLaMo 3 server.
+provides_tools: []
+provides_hooks:
+  - transform_llm_output

@@ -23,3 +23,6 @@ dot_config/zed/themes/
 dot_config/zed/
 *.back
 *.bak-*
+
+# Hermes plugin/test bytecode is local runtime state
+private_dot_hermes/**/__pycache__/
