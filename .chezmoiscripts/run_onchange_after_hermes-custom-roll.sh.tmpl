@@ -1,11 +1,27 @@
 {{- $hermes := lookPath "hermes" -}}
 {{- if $hermes -}}
+{{- $gguf := joinPath .chezmoi.destDir ".hermes/plamo/plamo-3-translate-2b-ereshkigal-en-ja.gguf" -}}
 #!/bin/sh
 set -eu
 
 # 本文の変更で再実行される。SOUL.md とは分離し、共有プールだけを正本にする。
 # 対象は chezmoi の配置先の既定プロファイル。呼出元の HERMES_HOME は引き継がない。
 export HERMES_HOME={{ joinPath .chezmoi.destDir ".hermes" | quote }}
+{{- if stat $gguf }}
+
+# 翻訳器の GGUF があるホストでは、Hermes は英語版 roll で答え、plamo-translate がエレシュキガルの日本語に訳す（#68）。
+# GGUF の有無で描画結果が変わるので、置いた・消した後の適用でもこの処理は再実行される。
+personality=$(cat <<'__HERMES_CUSTOM_ROLL__'
+{{ dict "system_prompt" (include "private_dot_hermes/custom-roll/ereshkigal.en.md" | trimSuffix "\n") | toJson }}
+__HERMES_CUSTOM_ROLL__
+)
+
+{{ $hermes | quote }} config set personalities.custom-roll "$personality" >/dev/null
+{{ $hermes | quote }} config set display.personality custom-roll
+# 長い回答の翻訳と llama-server の起動待ちが既定の 30 秒に収まらない。plugin 側の持ち時間は 150 秒。
+{{ $hermes | quote }} config set plugins.hook_callback_timeout 180 >/dev/null
+{{ $hermes | quote }} plugins enable plamo-translate >/dev/null
+{{- else }}
 
 personality=$(cat <<'__HERMES_CUSTOM_ROLL__'
 {{ dict "system_prompt" (include "dot_agents/custom-roll/ereshkigal.md" | trimSuffix "\n") | toJson }}
@@ -14,4 +30,11 @@ __HERMES_CUSTOM_ROLL__
 
 {{ $hermes | quote }} config set personalities.custom-roll "$personality" >/dev/null
 {{ $hermes | quote }} config set display.personality custom-roll
+# GGUF の無いホストで英語の返答がそのまま出ないよう、翻訳 plugin は止めておく。
+{{ $hermes | quote }} plugins disable plamo-translate >/dev/null 2>&1 || true
+# 翻訳器のために延ばした打ち切り時間は、ほかの plugin のフックにも効くので既定に戻す。自分で決めた値は残す。
+if [ "$({{ $hermes | quote }} config get plugins.hook_callback_timeout 2>/dev/null)" = "180" ]; then
+  {{ $hermes | quote }} config unset plugins.hook_callback_timeout >/dev/null
+fi
+{{- end }}
 {{- end }}

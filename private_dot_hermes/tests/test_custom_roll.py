@@ -12,6 +12,18 @@ TEMPLATE = Path(".chezmoiscripts/run_onchange_after_hermes-custom-roll.sh.tmpl")
 
 
 class CustomRollTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Hermes builds a dependency environment per data root (HERMES_HOME/installs) from PyPI. Share it across
+        # the tests so a network hiccup in one of seven downloads does not fail a random test.
+        cls.shared = tempfile.TemporaryDirectory(prefix="hermes-custom-roll-installs-")
+        cls.installs = Path(cls.shared.name) / "installs"
+        cls.installs.mkdir()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.shared.cleanup()
+
     def setUp(self):
         workspace = tempfile.TemporaryDirectory(prefix="hermes-custom-roll-")
         self.addCleanup(workspace.cleanup)
@@ -22,6 +34,7 @@ class CustomRollTests(unittest.TestCase):
         self.home.mkdir()
         self.hermes_home = self.home / ".hermes"
         self.hermes_home.mkdir(mode=0o700)
+        (self.hermes_home / "installs").symlink_to(self.installs, target_is_directory=True)
         self.env = {**os.environ, "HERMES_HOME": str(self.hermes_home)}
         self.role = self.source / "dot_agents/custom-roll/ereshkigal.md"
         self.role.parent.mkdir(parents=True)
@@ -59,7 +72,7 @@ class CustomRollTests(unittest.TestCase):
     def test_apply_registers_shared_markdown_as_selected_personality(self):
         self.apply()
 
-        self.assertEqual(self.get("agent.personalities.custom-roll.system_prompt"), self.content.rstrip("\n"))
+        self.assertEqual(self.get("personalities.custom-roll.system_prompt"), self.content.rstrip("\n"))
         self.assertEqual(self.get("display.personality"), "custom-roll")
         self.assertEqual(self.get("model.default"), "preserved-model")
         self.assertEqual(self.get("agent.max_turns"), 37)
@@ -94,9 +107,65 @@ class CustomRollTests(unittest.TestCase):
 
         self.apply()
 
-        self.assertEqual(self.get("agent.personalities.custom-roll.system_prompt"), updated)
+        self.assertEqual(self.get("personalities.custom-roll.system_prompt"), updated)
         self.assertEqual(self.get("display.personality"), "custom-roll")
 
+
+    def install_translator_sources(self):
+        """The GGUF branch registers the English roll and enables the plugin, so both must be in the source."""
+        for rel in ["private_dot_hermes/custom-roll/ereshkigal.en.md", "private_dot_hermes/plugins/plamo-translate"]:
+            src, dst = ROOT / rel, self.source / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+            else:
+                shutil.copyfile(src, dst)
+        gguf = self.hermes_home / "plamo/plamo-3-translate-2b-ereshkigal-en-ja.gguf"
+        gguf.parent.mkdir()
+        gguf.write_bytes(b"")
+        return gguf
+
+    def plugin_enabled(self):
+        result = self.command(shutil.which("hermes"), "plugins", "list")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        line = next((l for l in result.stdout.splitlines() if "plamo-translate" in l), "")
+        self.assertTrue(line, result.stdout)
+        return "disabled" not in line.lower()
+
+    def test_gguf_selects_english_roll_and_enables_translation(self):
+        self.install_translator_sources()
+
+        self.apply()
+
+        english = (ROOT / "private_dot_hermes/custom-roll/ereshkigal.en.md").read_text(encoding="utf-8")
+        self.assertEqual(self.get("personalities.custom-roll.system_prompt"), english.rstrip("\n"))
+        self.assertEqual(self.get("display.personality"), "custom-roll")
+        self.assertEqual(self.get("plugins.hook_callback_timeout"), 180)
+        self.assertTrue(self.plugin_enabled())
+
+    def test_removing_gguf_returns_to_japanese_roll_and_disables_translation(self):
+        gguf = self.install_translator_sources()
+        self.apply()
+        gguf.unlink()
+
+        self.apply()
+
+        self.assertEqual(self.get("personalities.custom-roll.system_prompt"), self.content.rstrip("\n"))
+        self.assertFalse(self.plugin_enabled())
+        # unset: the key leaves config.yaml and Hermes falls back to its default of 30 s
+        self.assertNotIn("hook_callback_timeout", self.config.read_text(encoding="utf-8"))
+        self.assertEqual(self.get("plugins.hook_callback_timeout"), 30)
+
+    def test_removing_gguf_keeps_a_timeout_the_user_chose(self):
+        gguf = self.install_translator_sources()
+        self.apply()
+        result = self.command(shutil.which("hermes"), "config", "set", "plugins.hook_callback_timeout", "45")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        gguf.unlink()
+
+        self.apply()
+
+        self.assertEqual(self.get("plugins.hook_callback_timeout"), 45)
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,3 +23,6 @@ dot_config/zed/themes/
 dot_config/zed/
 *.back
 *.bak-*
+
+# plamo-translate の開発時の確認（hermes plugins doctor / import）で source に .pyc ができる。
+__pycache__/
