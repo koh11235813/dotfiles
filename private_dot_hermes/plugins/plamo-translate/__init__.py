@@ -33,6 +33,7 @@ CODE = re.compile(r"```.*?```|`[^`\n]*`", re.S)
 JAPANESE = re.compile(r"[぀-ヿ㐀-鿿]")
 DEFAULT_URL = "http://127.0.0.1:8091"
 DEFAULT_MODEL = "~/.hermes/plamo/ereshkigal-2b.gguf"
+DEFAULT_URL_8B = "http://127.0.0.1:8092"
 DEFAULT_BUDGET = 150.0  # capped below plugins.hook_callback_timeout: a timed-out held hook withholds the reply
 USER_CHARS = 2000  # the user's message goes into `context`; a pasted log must not crowd out the answer
 
@@ -71,6 +72,14 @@ def restore_code(en, ja):
         last = m.end()
     parts.append(INLINE.sub(lambda _: next(spans), ja[last:]))
     return "".join(parts)
+
+
+def needs_8b(en):
+    """Technical answers (a code block, or three or more inline code spans) are where the 2B mistranslates terms:
+    on 22 held-out tech answers the 8B scored +1.47 ± 0.32 of 20 (fidelity 4.11 vs 3.36 of 5, #68 round 17)."""
+    blocks = len(FENCE.findall(en))
+    inline = len(INLINE.findall(FENCE.sub("", en)))
+    return blocks >= 1 or inline >= 3
 
 
 def kwargs_for(user_message):
@@ -210,7 +219,7 @@ def _text(user_message):
 
 
 def register(ctx):
-    server = Server()
+    server, server_8b = Server(), Server()
     users = {}  # session_id -> the user's latest message, which the translator reads after the soft tokens
     children = {}  # delegated subagent sessions: their replies go back to the parent model, not to the user
 
@@ -232,9 +241,22 @@ def register(ctx):
             budget = float(ctx.get_config("budget_seconds", DEFAULT_BUDGET))
             hook = _hook_timeout()
             deadline = started + (min(budget, hook - 15) if hook > 0 else budget)
-            server.ensure(base_url, ctx.get_config("model_path", DEFAULT_MODEL), deadline)
-            result = translate_answer(lambda text, kw: _translate(base_url, text, kw, deadline),
-                                      response_text, users.get(session_id, ""))
+            user = users.get(session_id, "")
+            model_8b = ctx.get_config("model_path_8b", "")
+            result = None
+            if model_8b and needs_8b(response_text):  # opt-in: technical answers to the 8B when it is configured
+                url_8b = ctx.get_config("base_url_8b", DEFAULT_URL_8B).rstrip("/")
+                try:
+                    _loopback(url_8b)
+                    server_8b.ensure(url_8b, model_8b, deadline)
+                    result = translate_answer(lambda text, kw: _translate(url_8b, text, kw, deadline),
+                                              response_text, user)
+                except Exception as exc:
+                    LOG.warning("8B translation failed (%s); trying the 2B", type(exc).__name__)
+            if result is None:
+                server.ensure(base_url, ctx.get_config("model_path", DEFAULT_MODEL), deadline)
+                result = translate_answer(lambda text, kw: _translate(base_url, text, kw, deadline),
+                                          response_text, user)
             LOG.info("PLaMo translation completed in %.1fs", time.monotonic() - started)
             return result
         except Exception as exc:

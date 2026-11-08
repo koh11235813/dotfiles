@@ -28,6 +28,12 @@ hermes config set plugins.entries.plamo-translate.settings.base_url http://127.0
 hermes config set plugins.entries.plamo-translate.settings.budget_seconds 120
 ```
 
+技術系の返答だけ 8B に回すこともできる（既定は無効）。8B の GGUF を指定すると、コードブロックがあるか、インラインのコードが3つ以上ある返答を `127.0.0.1:8092` の 8B で訳す。8B が使えなければ 2B で訳す。技術系の 22 件で、8B は 2B より 20 点満点で 1.47 点高く、忠実さは 4.11 対 3.36（#68 の第 17 ラウンド）。代わりに、その返答は 30 秒ほど遅くなる。
+
+```sh
+hermes config set plugins.entries.plamo-translate.settings.model_path_8b ~/.hermes/plamo/ereshkigal-8b.gguf
+```
+
 `base_url` はポート付きの HTTP ループバック（`127.0.0.1` か `::1`）だけを受け付ける。`/health` が ok を返すサーバなら何でも翻訳器として使うので、複数人で使うホストでは、別の人が先にそのポートを取ると返答を差し替えられる。一人で使う機械を前提にしている。
 
 ## 測った結果（#68）

@@ -234,5 +234,38 @@ class PlamoTranslateTests(unittest.TestCase):
 
         plamo.Server().ensure(f"http://127.0.0.1:{port}", str(model), time.monotonic() + 15)
 
+    def test_code_answers_go_to_the_8b_when_it_is_configured(self):
+        small = FakeServer(lambda text, kw: "2B の訳よ。")
+        large = FakeServer(lambda text, kw: "8B の訳よ。")
+        self.addCleanup(small.close)
+        self.addCleanup(large.close)
+        ctx = FakeContext(base_url=small.url, base_url_8b=large.url, model_path="/nonexistent.gguf",
+                          model_path_8b="/nonexistent-8b.gguf", budget_seconds=10)
+        plamo.register(ctx)
+
+        code = ctx.hooks["transform_llm_output"](response_text="Run:\n\n```sh\nls\n```", session_id="x")
+        chat = ctx.hooks["transform_llm_output"](response_text="Hmph, thank you.", session_id="x")
+
+        self.assertEqual((code, chat), ("8B の訳よ。", "2B の訳よ。"))
+        self.assertEqual((len(large.requests), len(small.requests)), (1, 1))
+
+    def test_unconfigured_8b_leaves_code_answers_on_the_2b(self):
+        server, ctx = self.serve(lambda text, kw: "2B の訳よ。")
+
+        ctx.hooks["transform_llm_output"](response_text="Use `a`, `b` and `c`.", session_id="x")
+
+        self.assertEqual(len(server.requests), 1)
+
+    def test_unavailable_8b_falls_back_to_the_2b(self):
+        small = FakeServer(lambda text, kw: "2B の訳よ。")
+        self.addCleanup(small.close)
+        ctx = FakeContext(base_url=small.url, base_url_8b="http://127.0.0.1:9", model_path="/nonexistent.gguf",
+                          model_path_8b="/nonexistent-8b.gguf", budget_seconds=10)
+        plamo.register(ctx)
+
+        out = ctx.hooks["transform_llm_output"](response_text="Use `a`, `b` and `c`.", session_id="x")
+
+        self.assertEqual(out, "2B の訳よ。")
+
 if __name__ == "__main__":
     unittest.main()
