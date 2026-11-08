@@ -8,6 +8,7 @@
 .claude/scripts/codex-mcp-bridge.mjs
 # PLaMo 翻訳の試験（PR #69、不採用で閉じた）の branch から apply すると置かれる。main の source には無い。
 .hermes/README.md
+.hermes/custom-roll
 .hermes/plugins/plamo-translate
 .hermes/tests/smoke_plamo.py
 .hermes/tests/test_plamo_translate.py
