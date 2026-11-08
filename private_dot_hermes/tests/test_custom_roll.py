@@ -120,7 +120,7 @@ class CustomRollTests(unittest.TestCase):
                 shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
             else:
                 shutil.copyfile(src, dst)
-        gguf = self.hermes_home / "plamo/ereshkigal-2b.gguf"
+        gguf = self.hermes_home / "plamo/plamo-3-translate-2b-ereshkigal-en-ja.gguf"
         gguf.parent.mkdir()
         gguf.write_bytes(b"")
         return gguf

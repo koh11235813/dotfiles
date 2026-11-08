@@ -4,11 +4,11 @@ Hermes が英語版 roll（`~/.hermes/custom-roll/ereshkigal.en.md`）で書い�
 
 ## 有効にする
 
-1. 翻訳器の GGUF を `~/.hermes/plamo/ereshkigal-2b.gguf` に置く（2B の `b18s175-2b-q8_0.gguf` をコピーかリンク）。`llama-server`（Homebrew の llama.cpp など）が PATH に要る。
+1. 翻訳器の GGUF を `~/.hermes/plamo/plamo-3-translate-2b-ereshkigal-en-ja.gguf` に置く（2B の `b18s175-2b-q8_0.gguf` をコピーかリンク）。`llama-server`（Homebrew の llama.cpp など）が PATH に要る。
 2. dotfiles を適用する。登録スクリプトが、GGUF のあるホストだけ英語版 roll を選び、この plugin を有効にし、`plugins.hook_callback_timeout` を 180 秒にする。GGUF の無いホストは日本語版 roll のまま、plugin は無効。
 3. 新しい Hermes のセッションで使う。
 
-最初の返答のとき、`127.0.0.1:8091` で llama-server が応答しなければ、plugin が GGUF を指定して起動する。起動した llama-server は Hermes を閉じても残る。止めるときは `pkill -f 'llama-server -m .*ereshkigal-2b.gguf'`。
+最初の返答のとき、`127.0.0.1:8091` で llama-server が応答しなければ、plugin が GGUF を指定して起動する。起動した llama-server は Hermes を閉じても残る。止めるときは `pkill -f 'llama-server -m .*plamo-3-translate-2b-ereshkigal-en-ja.gguf'`。
 
 ## 訳し方
 
@@ -31,7 +31,7 @@ hermes config set plugins.entries.plamo-translate.settings.budget_seconds 120
 技術系の返答だけ 8B に回すこともできる（既定は無効）。8B の GGUF を指定すると、コードブロックがあるか、インラインのコードが3つ以上ある返答を `127.0.0.1:8092` の 8B で訳す。8B が使えなければ 2B で訳す。技術系の 22 件で、8B は 2B より 20 点満点で 1.47 点高く、忠実さは 4.11 対 3.36（#68 の第 17 ラウンド）。代わりに、その返答は 30 秒ほど遅くなる。
 
 ```sh
-hermes config set plugins.entries.plamo-translate.settings.model_path_8b ~/.hermes/plamo/ereshkigal-8b.gguf
+hermes config set plugins.entries.plamo-translate.settings.model_path_8b ~/.hermes/plamo/plamo-3-translate-8b-ereshkigal-en-ja.gguf
 ```
 
 `base_url` はポート付きの HTTP ループバック（`127.0.0.1` か `::1`）だけを受け付ける。`/health` が ok を返すサーバなら何でも翻訳器として使うので、複数人で使うホストでは、別の人が先にそのポートを取ると返答を差し替えられる。一人で使う機械を前提にしている。
@@ -42,7 +42,7 @@ blind 審査、15 点満点（声・のだわ・自然さ）。日本語版 roll
 
 ## ライセンス
 
-GGUF は PLaMo Community License の派生モデル。手元で使うぶんには問題ないが、他人に渡すときは第 4 条の表示が要る。
+GGUF は PLaMo Community License の派生モデル。手元で使うぶんには問題ないが、他人に渡すときは第 4 条の表示が要る。ファイル名を `plamo-3-translate-<size>-ereshkigal-en-ja.gguf` にしているのは、元のモデルと用途（エレシュキガル口調、英語から日本語）が名前で分かるようにするためで、派生モデルの名前に「PLaMo」を入れる第 4 条の求めにも合う。
 
 ## 開発時の検証
 
