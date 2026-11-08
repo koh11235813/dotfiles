@@ -12,6 +12,18 @@ TEMPLATE = Path(".chezmoiscripts/run_onchange_after_hermes-custom-roll.sh.tmpl")
 
 
 class CustomRollTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Hermes builds a dependency environment per data root (HERMES_HOME/installs) from PyPI. Share it across
+        # the tests so a network hiccup in one of seven downloads does not fail a random test.
+        cls.shared = tempfile.TemporaryDirectory(prefix="hermes-custom-roll-installs-")
+        cls.installs = Path(cls.shared.name) / "installs"
+        cls.installs.mkdir()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.shared.cleanup()
+
     def setUp(self):
         workspace = tempfile.TemporaryDirectory(prefix="hermes-custom-roll-")
         self.addCleanup(workspace.cleanup)
@@ -22,6 +34,7 @@ class CustomRollTests(unittest.TestCase):
         self.home.mkdir()
         self.hermes_home = self.home / ".hermes"
         self.hermes_home.mkdir(mode=0o700)
+        (self.hermes_home / "installs").symlink_to(self.installs, target_is_directory=True)
         self.env = {**os.environ, "HERMES_HOME": str(self.hermes_home)}
         self.role = self.source / "dot_agents/custom-roll/ereshkigal.md"
         self.role.parent.mkdir(parents=True)
