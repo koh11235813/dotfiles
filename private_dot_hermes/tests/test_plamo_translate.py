@@ -78,6 +78,9 @@ class FakeContext:
     def register_hook(self, name, fn, **opts):
         self.hooks[name] = fn
 
+    def register_middleware(self, kind, fn):
+        self.hooks["middleware:" + kind] = fn
+
 
 class PlamoTranslateTests(unittest.TestCase):
     def serve(self, reply, finish="stop"):
@@ -288,6 +291,65 @@ class PlamoTranslateTests(unittest.TestCase):
         ctx.hooks["transform_llm_output"](response_text=en, session_id="x")
 
         self.assertEqual(len(server.requests), 1)
+
+    def roll_files(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        en, ja = Path(tmp.name) / "en.md", Path(tmp.name) / "ja.md"
+        en.write_text("Act as Ereshkigal.\nAnswer in English.\n", encoding="utf-8")
+        ja.write_text("エレシュキガルとして振る舞う。\n", encoding="utf-8")
+        return str(en), str(ja)
+
+    def test_claude_session_gets_the_japanese_roll_and_no_translation(self):
+        en, ja = self.roll_files()
+        server = FakeServer(lambda text, kw: "訳")
+        self.addCleanup(server.close)
+        ctx = FakeContext(base_url=server.url, model_path="/nonexistent.gguf", en_roll=en, ja_roll=ja, budget_seconds=5)
+        plamo.register(ctx)
+        request = {"model": "claude-haiku-5-5", "messages": [
+            {"role": "system", "content": "SOUL\n\nAct as Ereshkigal.\nAnswer in English.\n\nTools..."},
+            {"role": "user", "content": "こんにちは"}]}
+
+        out = ctx.hooks["middleware:llm_request"](request=request, model="claude-haiku-5-5")
+        reply = ctx.hooks["transform_llm_output"](response_text="ふん、こんにちは。", session_id="x", model="claude-haiku-5-5")
+
+        self.assertEqual(out["request"]["messages"][0]["content"], "SOUL\n\nエレシュキガルとして振る舞う。\n\nTools...")
+        self.assertEqual(out["request"]["messages"][1], request["messages"][1])
+        self.assertIn("Act as Ereshkigal", request["messages"][0]["content"])  # the original request is not mutated
+        self.assertIsNone(reply)
+        self.assertEqual(server.requests, [])
+
+    def test_glm_session_keeps_the_english_roll_and_is_translated(self):
+        en, ja = self.roll_files()
+        server = FakeServer(lambda text, kw: "ふん、訳よ。")
+        self.addCleanup(server.close)
+        ctx = FakeContext(base_url=server.url, model_path="/nonexistent.gguf", en_roll=en, ja_roll=ja, budget_seconds=5)
+        plamo.register(ctx)
+        request = {"messages": [{"role": "system", "content": "Act as Ereshkigal.\nAnswer in English."}]}
+
+        self.assertIsNone(ctx.hooks["middleware:llm_request"](request=request, model="glm-5.3-flash"))
+        self.assertEqual(ctx.hooks["transform_llm_output"](response_text="Hmph.", session_id="x", model="glm-5.3-flash"), "ふん、訳よ。")
+
+    def test_roll_swap_covers_content_parts_and_a_top_level_system(self):
+        en, ja = self.roll_files()
+        ctx = FakeContext(en_roll=en, ja_roll=ja)
+        plamo.register(ctx)
+        request = {"system": [{"type": "text", "text": "Act as Ereshkigal.\nAnswer in English.", "cache_control": {"type": "ephemeral"}}],
+                   "messages": [{"role": "user", "content": "hi"}]}
+
+        out = ctx.hooks["middleware:llm_request"](request=request, model="anthropic/claude-haiku-5-5")
+
+        self.assertEqual(out["request"]["system"][0]["text"], "エレシュキガルとして振る舞う。")
+        self.assertEqual(out["request"]["system"][0]["cache_control"], {"type": "ephemeral"})
+
+    def test_no_swap_when_the_english_roll_is_not_in_the_prompt(self):
+        en, ja = self.roll_files()
+        ctx = FakeContext(en_roll=en, ja_roll=ja)
+        plamo.register(ctx)
+
+        self.assertIsNone(ctx.hooks["middleware:llm_request"](request={"messages": [{"role": "system", "content": "other"}]},
+                                                              model="claude-haiku-5-5"))
 
 if __name__ == "__main__":
     unittest.main()

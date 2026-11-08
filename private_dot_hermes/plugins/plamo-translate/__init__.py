@@ -34,6 +34,12 @@ JAPANESE = re.compile(r"[぀-ヿ㐀-鿿]")
 DEFAULT_URL = "http://127.0.0.1:8091"
 DEFAULT_MODEL = "~/.hermes/plamo/plamo-3-translate-2b-ereshkigal-en-ja.gguf"
 DEFAULT_URL_8B = "http://127.0.0.1:8092"
+# Models whose own Japanese beats the translation pipeline: Claude Haiku 5.5 writing Japanese with the Japanese roll
+# scored 14.20 of 15, the same model through the translator 10.41 (#68 round 22). For these the plugin swaps the
+# English roll in the system prompt for the Japanese one and leaves the reply alone.
+DEFAULT_DIRECT = r"^(anthropic/)?claude"
+EN_ROLL = "~/.hermes/custom-roll/ereshkigal.en.md"
+JA_ROLL = "~/.agents/custom-roll/ereshkigal.md"
 DEFAULT_BUDGET = 150.0  # capped below plugins.hook_callback_timeout: a timed-out held hook withholds the reply
 USER_CHARS = 2000  # the user's message goes into `context`; a pasted log must not crowd out the answer
 
@@ -226,6 +232,38 @@ def _hook_timeout():
         return 180.0
 
 
+def _read(path):
+    try:
+        return Path(os.path.expanduser(path)).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def swap_roll(request, en, ja):
+    """Replace the English roll inside the system prompt of an LLM request; None when it is not there."""
+    if not en or not ja:
+        return None
+    changed = False
+
+    def swap(content):
+        nonlocal changed
+        if isinstance(content, str) and en in content:
+            changed = True
+            return content.replace(en, ja)
+        if isinstance(content, list):
+            return [{**part, "text": swap(part["text"])} if isinstance(part, dict) and isinstance(part.get("text"), str)
+                    else part for part in content]
+        return content
+
+    out = dict(request)
+    if "system" in out:
+        out["system"] = swap(out["system"])
+    if isinstance(out.get("messages"), list):
+        out["messages"] = [{**m, "content": swap(m.get("content"))} if isinstance(m, dict) and m.get("role") in ("system", "developer")
+                           else m for m in out["messages"]]
+    return out if changed else None
+
+
 def _text(user_message):
     if isinstance(user_message, str):
         return user_message
@@ -247,9 +285,25 @@ def register(ctx):
             while len(d) > 64:
                 d.pop(next(iter(d)), None)
 
-    def translate_reply(response_text, session_id="", **kwargs):
+    def direct(model):
+        return bool(model) and re.search(ctx.get_config("direct_models", DEFAULT_DIRECT), str(model), re.I)
+
+    def japanese_roll(request=None, model="", **kwargs):
+        if not isinstance(request, dict) or not direct(model):
+            return None
+        swapped = swap_roll(request, _read(ctx.get_config("en_roll", EN_ROLL)), _read(ctx.get_config("ja_roll", JA_ROLL)))
+        if swapped is None:
+            LOG.info("English roll not found in the %s request; left as is", model)
+            return None
+        LOG.info("Japanese roll swapped in for %s", model)
+        return {"request": swapped, "source": "plamo-translate", "reason": "Japanese roll for a model that writes Japanese well"}
+
+    def translate_reply(response_text, session_id="", model="", **kwargs):
         if session_id in children:
             return None  # leave a subagent's report in English for its parent
+        if direct(model):
+            LOG.info("No translation for %s: it answered with the Japanese roll", model)
+            return None  # it already answered in Japanese with the Japanese roll
         started = time.monotonic()
         try:
             base_url = ctx.get_config("base_url", DEFAULT_URL).rstrip("/")
@@ -281,4 +335,5 @@ def register(ctx):
             return response_text
 
     ctx.register_hook("pre_llm_call", remember)
+    ctx.register_middleware("llm_request", japanese_roll)
     ctx.register_hook("transform_llm_output", translate_reply, hold_stream=True)
