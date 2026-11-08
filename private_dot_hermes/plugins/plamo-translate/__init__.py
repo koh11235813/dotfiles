@@ -82,6 +82,21 @@ def needs_8b(en):
     return blocks >= 1 or inline >= 3
 
 
+def retranslate_leftovers(translate, en, ja, kw):
+    """The 2B sometimes copies a paragraph through untranslated (often the closing aside). A Japanese paragraph that
+    is identical to an English one, has words outside code and no Japanese at all is translated again on its own."""
+    english = {p.strip() for p in SEP.split(en.strip())[::2]}
+    parts = SEP.split(ja.strip())
+    for i in range(0, len(parts), 2):
+        para = parts[i].strip()
+        prose = CODE.sub("", para)
+        if para in english and re.search(r"[A-Za-z]{3,}", prose) and not JAPANESE.search(para) and not FENCE.search(para):
+            redo = translate(para, kw).strip()
+            if JAPANESE.search(redo):
+                parts[i] = redo
+    return "".join(parts)
+
+
 def kwargs_for(user_message):
     return {"source_lang": "en", "target_lang": "ja", "context": SOFT + "\n" + user_message[-USER_CHARS:], "glossary": GLOSSARY}
 
@@ -101,6 +116,7 @@ def translate_answer(translate, en, user_message):
                 if WARN_OPEN.match(en_parts[i]) and polite_ratio(ja_parts[i]) < 0.5:
                     ja_parts[i] = translate(en_parts[i], polite).strip()
             ja = "".join(ja_parts)
+    ja = retranslate_leftovers(translate, en, ja, kw)
     return normalize_address(restore_code(en, ja))
 
 

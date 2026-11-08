@@ -267,5 +267,27 @@ class PlamoTranslateTests(unittest.TestCase):
 
         self.assertEqual(out, "2B の訳よ。")
 
+    def test_paragraph_left_in_english_is_translated_again(self):
+        en = "Use `!$` for the last word.\n\n...It is not as though I am trying to be helpful. Forget I said that."
+
+        def reply(text, kw):
+            if text.startswith("...It is"):
+                return "……別に、親切にしたいわけじゃないのよ。今のは忘れなさい。"
+            return "最後の単語には `!$` を使いなさい。\n\n...It is not as though I am trying to be helpful. Forget I said that."
+        server, ctx = self.serve(reply)
+
+        out = ctx.hooks["transform_llm_output"](response_text=en, session_id="x")
+
+        self.assertEqual(out, "最後の単語には `!$` を使いなさい。\n\n……別に、親切にしたいわけじゃないのよ。今のは忘れなさい。")
+        self.assertEqual(len(server.requests), 2)
+
+    def test_english_command_paragraph_is_not_retranslated(self):
+        en = "Run this:\n\n`git status`"
+        server, ctx = self.serve(lambda text, kw: "これを実行しなさい：\n\n`git status`")
+
+        ctx.hooks["transform_llm_output"](response_text=en, session_id="x")
+
+        self.assertEqual(len(server.requests), 1)
+
 if __name__ == "__main__":
     unittest.main()
