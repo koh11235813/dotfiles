@@ -1,7 +1,0 @@
-name: plamo-translate
-version: 0.2.0
-description: Translate Hermes's English replies into Ereshkigal's Japanese with the fine-tuned PLaMo 3 Translate GGUF on a loopback llama-server.
-provides_tools: []
-provides_hooks:
-  - pre_llm_call
-  - transform_llm_output
