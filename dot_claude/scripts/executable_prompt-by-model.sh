@@ -5,6 +5,7 @@
 #   claude-opus-5-5[1m] → default.md + opus.md + opus-5-5.md
 # opus-5.md は opus-5-5 に継承させない。版ごとに挙動の向きが逆の項目があるため
 # （Opus 5 は委譲過多、Opus 5.5 は並列委譲が得意）、共通にしたいものだけ <family>.md に置く。
+# mythos-<n> は fable-<n> の断片を読む。同じ番号の Fable と同じモデルなので、断片を別に持たない。
 # モデル名は model-state.sh が書いた ~/.claude/state/model.d/<session_id> から読む。
 
 PROMPT_DIR="$HOME/.claude/prompts/by-model"
@@ -23,6 +24,9 @@ esac
 
 MODEL=${MODEL%%\[*}
 VERSION=${MODEL#claude-}
+case "$VERSION" in
+    mythos|mythos-*) VERSION=fable${VERSION#mythos} ;;
+esac
 FAMILY=${VERSION%%-*}
 
 [ -r "$PROMPT_DIR/default.md" ] && cat "$PROMPT_DIR/default.md"
