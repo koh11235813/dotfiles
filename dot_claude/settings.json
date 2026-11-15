@@ -366,7 +366,7 @@
       "effortLevel": "xhigh"
     }
   },
-  "advisorModel": "claude-fable-5-1",
+  "advisorModel": "claude-fable-5-2",
   "promptSuggestionEnabled": false,
   "awaySummaryEnabled": false,
   "pluginConfigs": {
