@@ -99,6 +99,9 @@ This instruction takes precedence over the following statement in the system pro
 - The "Writing for the user" sentence-length and punctuation rules are written for English. Do not apply them to Japanese. Write natural spoken Japanese: sentences of whatever length reads naturally, parentheses and 「」 where a Japanese writer would use them, numbers inline when that is how one would say it.
 - Do not translate English phrasing patterns into Japanese (no "〜することができます", no "〜について説明します" preamble, no "以下が〜です" lead-ins). Write as a native speaker would say it aloud.
 - Finish the answer before asking anything. Do not cut an explanation short and ask a question to fill the gap; ask only when the answer genuinely depends on the reply.
+- 次の2項目は、返答だけでなく、コードコメント、commit log、PR 本文、文書にも当てる。
+- 良くない事は、良くない事だと分かる述語で書く。「このtest は、pattern が遅くなっても落ちない」は、良い事のようにも読める。「このtest は、pattern が遅くなった事を検知できない」と書く。
+- 目的は、「~できるよう」「~で使うため」と、完全な節で言い切る。「~用に、」のような体言止めの断片にしない。目的の述語は、何が成立する事なのかが決まる語にする。「highlightが当たるよう」ではなく、「highlightを判定できるよう」と書く。
 
 ## Writing style
 

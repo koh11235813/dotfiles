@@ -285,6 +285,31 @@ class NgCheckTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout.strip(), "")
 
+    def test_shipped_patterns_detect_purpose_fragment(self):
+        """目的を「X用に、」「X用に。」と断片で書いた文は、実 TSV で発火する。"""
+        for text in ("レビュー用に、作業中とは別の写しを作る。",
+                     "この venv は template の確認用に。"):
+            with self.subTest(text=text):
+                proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                                 "last_assistant_message": text},
+                                {"NG_PATTERNS_FILE": str(REAL_TSV)})
+                reason = block_reason(proc)
+                self.assertIsNotNone(reason)
+                self.assertIn("断片", reason)
+
+    def test_shipped_patterns_allow_yo_compounds_and_rule_quote(self):
+        """「専用に、」などの別語と、CLAUDE.md の規則が引く「~用に、」は発火しない。"""
+        for text in ("この設定は Claude 専用に、別のファイルへ分けた。",
+                     "既存の関数を流用に。",
+                     "「~用に、」のような体言止めの断片にしない。",
+                     "「〜用に、」のような体言止めの断片にしない。"):
+            with self.subTest(text=text):
+                proc = run_hook({"hook_event_name": "Stop", "stop_hook_active": False,
+                                 "last_assistant_message": text},
+                                {"NG_PATTERNS_FILE": str(REAL_TSV)})
+                self.assertEqual(proc.returncode, 0)
+                self.assertEqual(proc.stdout.strip(), "")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
