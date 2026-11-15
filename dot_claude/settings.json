@@ -381,6 +381,7 @@
   "theme": "dark-daltonized",
   "editorMode": "vim",
   "verbose": true,
+  "ultracode": true,
   "switchModelsOnFlag": false,
   "autoContinueAtUsageLimit": false,
   "remoteControlAtStartup": true,
