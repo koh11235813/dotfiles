@@ -354,10 +354,19 @@
       "effortLevel": "high"
     },
     "claude-fable-5-1": {
-      "effortLevel": "medium"
+      "effortLevel": "high"
+    },
+    "claude-fable-5-2": {
+      "effortLevel": "xhigh"
+    },
+    "claude-mythos-5-1": {
+      "effortLevel": "high"
+    },
+    "claude-mythos-5-2": {
+      "effortLevel": "xhigh"
     }
   },
-  "advisorModel": "claude-fable-5-1",
+  "advisorModel": "claude-fable-5-2",
   "promptSuggestionEnabled": false,
   "awaySummaryEnabled": false,
   "pluginConfigs": {
@@ -372,6 +381,7 @@
   "theme": "dark-daltonized",
   "editorMode": "vim",
   "verbose": true,
+  "ultracode": true,
   "switchModelsOnFlag": false,
   "autoContinueAtUsageLimit": false,
   "remoteControlAtStartup": true,

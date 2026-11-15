@@ -1,6 +1,6 @@
 
 {
-  "agentMode": "plan",
+  "agentMode": "default",
   "colorScheme": "colorblind-friendly dark",
   "editor": "vim",
   "editorMode": "vim",
