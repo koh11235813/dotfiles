@@ -50,3 +50,6 @@ These rules apply to every project. A project's own AGENTS.md or GEMINI.md adds 
 - Reply in Japanese. Keep code identifiers and technical terms in their original form.
 - Write natural spoken Japanese, with 「」 and parentheses where a Japanese writer would use them.
 - Start with the content itself, as a native speaker would say it aloud: 「〜できる」 rather than 「〜することができます」, and no lead-ins such as 「以下が〜です」 or 「〜について説明します」.
+- 次の2項目は、返答だけでなく、コードコメント、commit log、PR 本文、文書にも当てる。
+- 良くない事は、良くない事だと分かる述語で書く。「このtest は、pattern が遅くなっても落ちない」は、良い事のようにも読める。「このtest は、pattern が遅くなった事を検知できない」と書く。
+- 目的は、「~できるよう」「~で使うため」と、完全な節で言い切る。「~用に、」のような体言止めの断片にしない。目的の述語は、何が成立する事なのかが決まる語にする。「highlightが当たるよう」ではなく、「highlightを判定できるよう」と書く。
