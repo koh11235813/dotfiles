@@ -1,7 +1,7 @@
 #!/bin/bash
 # antigravity-cli (agy) statusline script
 # settings.json の statusLine.stack_with_default=true で、既定行（モデル名・effort）の下に出る
-# Line 1: ctx bar% tokens
+# Line 1: ctx bar% tokens tps
 # Line 2: 5h bar% reset_time  7d bar% reset_time
 #
 # agy は非ゼロ終了を 30 回続けると statusline を自動で無効化するので、何があっても exit 0 で終わる
@@ -63,7 +63,7 @@ braille_bar() {
 # ---------- Parse stdin (single jq call) ----------
 # quota は "gemini-5h" / "gemini-weekly" / "3p-5h" / "3p-weekly" のマップで、
 # Gemini 以外（Claude, GPT-OSS）は 3p 側を消費する
-used_pct="" in_tokens="" out_tokens=""
+used_pct="" in_tokens="" out_tokens="" agent_state=""
 FIVE_HOUR_PCT="" FIVE_HOUR_RESET="" WEEKLY_PCT="" WEEKLY_RESET=""
 eval "$(printf '%s' "$input" | jq -r '
   def used(q): if (q.remaining_fraction | type) == "number" then ((1 - q.remaining_fraction) * 100 | tostring) else "" end;
@@ -73,6 +73,7 @@ eval "$(printf '%s' "$input" | jq -r '
   | "used_pct="        + (.context_window.used_percentage // "" | tostring),
     "in_tokens="       + (.context_window.total_input_tokens // "" | tostring),
     "out_tokens="      + (.context_window.total_output_tokens // "" | tostring),
+    "agent_state="     + (.agent_state // "" | tostring),
     "FIVE_HOUR_PCT="   + used($q[$pool + "-5h"]),
     "FIVE_HOUR_RESET=" + reset($q[$pool + "-5h"]),
     "WEEKLY_PCT="      + used($q[$pool + "-weekly"]),
@@ -101,6 +102,25 @@ format_tokens() {
   }'
 }
 
+# ---------- Tokens per second ----------
+# payload に所要時間が無く、statusline は状態遷移のときにしか呼ばれないので、前回の呼び出しからの
+# 出力 token の増分を経過時間で割る。前回が working でなかった区間（ツール実行・待機）は割らずに前回の値を出し、
+# 累計が減ったら（会話が変わったら）出さない。agy は statusline を sh -c で起動し、sh がそのまま exec するので
+# $PPID は agy 本体になり、agy のプロセスごとに前回値を分けられる
+tps=""
+if [ -n "$out_tokens" ]; then
+  tps_state="${TMPDIR:-/tmp}/agy-statusline-tps.$PPID"
+  now=$(date +%s.%N)
+  prev_t="" prev_out="" prev_state="" prev_tps=""
+  [ -f "$tps_state" ] && read -r prev_t prev_out prev_state prev_tps < "$tps_state"
+  tps=$(awk -v now="$now" -v out="$out_tokens" -v pt="$prev_t" -v po="$prev_out" -v ps="$prev_state" -v old="$prev_tps" 'BEGIN {
+    if (ps == "working" && out > po && now > pt) printf "%d", (out - po) / (now - pt) + 0.5
+    else if (out >= po) printf "%s", old
+  }')
+  # agent_state は omitempty なので空のことがあり、空のまま書くと read の列がずれる
+  printf '%s %s %s %s\n' "$now" "$out_tokens" "${agent_state:--}" "$tps" > "$tps_state.$$" && mv -f "$tps_state.$$" "$tps_state"
+fi
+
 # ---------- quota segment ----------
 quota_segment() {
   local label="$1" pct="$2" reset="$3" reset_format="$4"
@@ -126,7 +146,9 @@ if [ -n "$used_pct" ]; then
 else
   line1="${GRAY}ctx         --%${RESET}"
 fi
-line1+=" ${DIM}tok ↑$(format_tokens "$in_tokens") ↓$(format_tokens "$out_tokens")${RESET}"
+line1+=" ${DIM}tok ↑$(format_tokens "$in_tokens") ↓$(format_tokens "$out_tokens")"
+[ -n "$tps" ] && line1+=" ${tps}tps"
+line1+="${RESET}"
 
 # ---------- Line 2 (5h + weekly) ----------
 line2="$(quota_segment " 5h" "$FIVE_HOUR_PCT" "$FIVE_HOUR_RESET" "+%-I%p")"

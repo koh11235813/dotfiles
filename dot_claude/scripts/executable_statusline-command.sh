@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code statusline script
-# Line 1: ctx bar% model_name
+# Line 1: ctx% tps model_name
 # Line 2:  5h bar% reset_time
 # Line 3:  7d bar% reset_time
 
@@ -67,6 +67,7 @@ eval "$(echo "$input" | jq -r '
   "model_name="      + (.model.display_name // "Unknown" | @sh),
   "used_pct="        + (.context_window.used_percentage // 0 | tostring),
   "cc_version="      + (.version // "0.0.0" | @sh),
+  "transcript_path=" + (.transcript_path // "" | @sh),
   "FIVE_HOUR_PCT="   + (.rate_limits.five_hour.used_percentage | if type=="number" then tostring else "" end),
   "FIVE_HOUR_RESET=" + (.rate_limits.five_hour.resets_at       | if type=="number" then tostring else "" end),
   "SEVEN_DAY_PCT="   + (.rate_limits.seven_day.used_percentage  | if type=="number" then tostring else "" end),
@@ -128,6 +129,32 @@ if [ -n "$used_pct" ] && [ "$used_pct" != "null" ] && [ "$used_pct" != "0" ]; th
   ctx_pct_int=$(printf "%.0f" "$used_pct" 2>/dev/null || echo 0)
 fi
 
+# ---------- Tokens per second (most recent response) ----------
+# payload の total_output_tokens は直近の応答1回分だが、total_api_duration_ms はセッション累計なので、
+# 割っても直近の速度にならない。transcript から直近の応答の output_tokens と、その前の entry から
+# 応答の最後の block までの時間（TTFT を含む）を取る。サブエージェントの応答は数えない
+tps=""
+if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+  tps=$(tail -n 60 "$transcript_path" 2>/dev/null | jq -nR '
+    def ms: capture("^(?<s>[^.Z]+)(\\.(?<f>[0-9]+))?Z$")
+      | ((.s + "Z") | fromdateiso8601) * 1000 + ((.f // "") + "000" | .[0:3] | tonumber);
+    [inputs | fromjson? | select((.type == "user" or .type == "assistant") and (.isSidechain | not))] as $e
+    | ($e | map(.type == "assistant" and .message.model != "<synthetic>") | rindex(true)) as $i
+    | if $i == null then empty else
+        $e[$i].message.id as $id
+        | ($e | map(.message.id == $id) | index(true)) as $first
+        | if $first == 0 then empty else
+            ($e[$first - 1].timestamp | ms) as $t0
+            | [$e[$first:$i + 1][] | select(.message.id == $id)] as $m
+            | ([$m[].timestamp | ms] | max) as $t1
+            | ([$m[].message.usage.output_tokens // 0] | max) as $out
+            | if $t1 > $t0 and $out > 0 then $out * 1000 / ($t1 - $t0) | round else empty end
+          end
+      end' 2>/dev/null)
+fi
+tps_seg=""
+[ -n "$tps" ] && tps_seg=" ${DIM}${tps}tps${RESET}"
+
 # ---------- PROMPT / RPROMPT ----------
 cwd_full=$(pwd | sed "s|^${HOME}|~|")
 cwd_parent=$(dirname "$cwd_full")
@@ -144,10 +171,9 @@ git_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
 rprompt_display=""
 [ -n "$git_branch" ] && rprompt_display=" ${CYAN_P}[${git_branch}]${RESET}"
 
-# ---------- Line 1 (prompt + ctx + model) ----------
+# ---------- Line 1 (prompt + ctx + tps + model) ----------
 ctx_color=$(color_for_pct "$ctx_pct_int")
-ctx_bar=$(braille_bar "$ctx_pct_int" 8)
-line1="${prompt_display}${rprompt_display} ${ctx_color}ctx ${ctx_bar} ${ctx_pct_int}%${RESET} ${GREEN}${model_name}${RESET}"
+line1="${prompt_display}${rprompt_display} ${ctx_color}ctx ${ctx_pct_int}%${RESET}${tps_seg} ${GREEN}${model_name}${RESET}"
 
 # ---------- Line 2 (5h) ----------
 if [ -n "$FIVE_HOUR_PCT" ]; then
