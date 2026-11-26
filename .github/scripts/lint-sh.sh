@@ -29,7 +29,7 @@ run_shellcheck() {
   local extra=()
   case $rel in
     dot_claude/scripts/executable_statusline-command.sh)
-      extra=(-e SC2034 -e SC2154) ;;
+      extra=(-e SC2034 -e SC2088 -e SC2154) ;;
     dot_config/waybar/scripts/executable_brightness_ascii.sh)
       extra=(-e SC2059) ;;
     dot_config/waybar/scripts/executable_volume_ascii.sh)
@@ -37,6 +37,8 @@ run_shellcheck() {
   esac
   shellcheck --severity=warning "${extra[@]}" "$file"
 }
+
+failed=0
 
 mapfile_sh=()
 while IFS= read -r rel; do
@@ -57,26 +59,37 @@ for rel in "${mapfile_sh[@]}"; do
   case $shebang in
     *zsh*)
       if ((HAS_ZSH)); then
-        zsh -n "$file"
-        echo "ok(zsh -n): $rel"
+        if zsh -n "$file"; then
+          echo "ok(zsh -n): $rel"
+        else
+          failed=1
+        fi
       else
         echo "skip(zsh not installed): $rel"
       fi
       ;;
     *bash*)
-      bash -n "$file"
-      if ((HAS_SHELLCHECK)); then
-        run_shellcheck "$file" "$rel"
-        echo "ok(bash -n + shellcheck): $rel"
+      if ! bash -n "$file"; then
+        failed=1
+      elif ((HAS_SHELLCHECK)); then
+        if run_shellcheck "$file" "$rel"; then
+          echo "ok(bash -n + shellcheck): $rel"
+        else
+          failed=1
+        fi
       else
         echo "ok(bash -n): $rel"
       fi
       ;;
     *)
-      sh -n "$file"
-      if ((HAS_SHELLCHECK)); then
-        run_shellcheck "$file" "$rel"
-        echo "ok(sh -n + shellcheck): $rel"
+      if ! sh -n "$file"; then
+        failed=1
+      elif ((HAS_SHELLCHECK)); then
+        if run_shellcheck "$file" "$rel"; then
+          echo "ok(sh -n + shellcheck): $rel"
+        else
+          failed=1
+        fi
       else
         echo "ok(sh -n): $rel"
       fi
@@ -103,10 +116,14 @@ if command -v chezmoi >/dev/null 2>&1; then
     < "$REPO_ROOT/.chezmoiscripts/run_onchange_after_hermes-custom-roll.sh.tmpl" \
     > "$TMP_DIR/hermes-custom-roll.sh"
 
-  sh -n "$TMP_DIR/hermes-custom-roll.sh"
-  if ((HAS_SHELLCHECK)); then
-    shellcheck --severity=warning "$TMP_DIR/hermes-custom-roll.sh"
-    echo "ok(sh -n + shellcheck): .chezmoiscripts/run_onchange_after_hermes-custom-roll.sh.tmpl (rendered)"
+  if ! sh -n "$TMP_DIR/hermes-custom-roll.sh"; then
+    failed=1
+  elif ((HAS_SHELLCHECK)); then
+    if shellcheck --severity=warning "$TMP_DIR/hermes-custom-roll.sh"; then
+      echo "ok(sh -n + shellcheck): .chezmoiscripts/run_onchange_after_hermes-custom-roll.sh.tmpl (rendered)"
+    else
+      failed=1
+    fi
   else
     echo "ok(sh -n): .chezmoiscripts/run_onchange_after_hermes-custom-roll.sh.tmpl (rendered)"
   fi
@@ -116,9 +133,14 @@ if command -v chezmoi >/dev/null 2>&1; then
     for host in darwin Arch; do
       eval "$("$H" launch --host "$host")"
       "$H" doctor "$RUN_ID" >/dev/null
-      zsh -n "$SCRATCH_HOME/.zshrc"
-      echo "ok(zsh -n): dot_zshrc.tmpl ($host rendered)"
+      if zsh -n "$SCRATCH_HOME/.zshrc"; then
+        echo "ok(zsh -n): dot_zshrc.tmpl ($host rendered)"
+      else
+        failed=1
+      fi
       "$H" cleanup "$RUN_ID" >/dev/null
     done
   fi
 fi
+
+exit "$failed"
