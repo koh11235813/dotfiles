@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "model": { "type": "string" },
+    "agentMode": { "type": "string" },
+    "colorScheme": { "type": "string" },
+    "editor": { "type": "string" },
+    "editorMode": { "type": "string" },
+    "enableTerminalSandbox": { "type": "boolean" },
+    "notifications": { "type": "boolean" },
+    "showFeedbackSurvey": { "type": "boolean" },
+    "statusLine": {
+      "type": "object",
+      "required": ["type", "command"],
+      "properties": {
+        "type": { "type": "string", "enum": ["command"] },
+        "command": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "stack_with_default": { "type": "boolean" }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "deny": { "type": "array", "items": { "type": "string" } },
+        "ask": { "type": "array", "items": { "type": "string" } },
+        "allow": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

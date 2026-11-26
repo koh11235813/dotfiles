@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["theme", "defaultProvider", "defaultModel"],
+  "properties": {
+    "theme": { "type": "string" },
+    "defaultProvider": { "type": "string" },
+    "defaultModel": { "type": "string" },
+    "skills": { "type": "array", "items": { "type": "string" } }
+  }
+}

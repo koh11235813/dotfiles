@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["providers"],
+  "properties": {
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["baseUrl", "api", "apiKey", "models"],
+        "properties": {
+          "baseUrl": { "type": "string" },
+          "api": { "type": "string" },
+          "apiKey": { "type": "string" },
+          "models": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id"],
+              "properties": {
+                "id": { "type": "string" },
+                "contextWindow": { "type": "integer", "minimum": 1 },
+                "reasoning": { "type": "boolean" },
+                "thinkingLevelMap": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": ["string", "null"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
