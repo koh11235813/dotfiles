@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install zsh and chezmoi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
+      - name: Lint shell scripts and rendered templates
+        run: bash .github/scripts/lint-sh.sh --require-shellcheck
+
+  lint-json:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test JSON/JSONL validator
+        run: python3 .github/scripts/test_check_json.py
+      - name: Validate JSON, JSONC, and JSONL files
+        run: python3 .github/scripts/check_json.py --repo
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install chezmoi
+        run: sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
+      - name: Run Codex hook tests
+        run: python3 dot_codex/hooks/tests/test_permission_review.py
+      - name: Run chezmoi dotfiles verification
+        run: bash .github/scripts/ci-verify-dotfiles.sh

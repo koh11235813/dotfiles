@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "cleanupPeriodDays": { "type": "integer", "minimum": 0 },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string" } },
+        "ask": { "type": "array", "items": { "type": "string" } },
+        "deny": { "type": "array", "items": { "type": "string" } },
+        "defaultMode": { "type": "string" }
+      }
+    },
+    "model": { "type": "string" },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["hooks"],
+          "properties": {
+            "matcher": { "type": "string" },
+            "hooks": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["type", "command"],
+                "properties": {
+                  "type": { "type": "string", "enum": ["command"] },
+                  "command": { "type": "string" },
+                  "timeout": { "type": "number", "minimum": 0 },
+                  "statusMessage": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "statusLine": {
+      "type": "object",
+      "required": ["type", "command"],
+      "properties": {
+        "type": { "type": "string", "enum": ["command"] },
+        "command": { "type": "string" }
+      }
+    },
+    "enabledPlugins": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "language": { "type": "string" },
+    "effortLevel": { "type": "string", "enum": ["low", "medium", "high", "xhigh"] },
+    "modelSettings": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "effortLevel": { "type": "string", "enum": ["low", "medium", "high", "xhigh"] }
+        }
+      }
+    }
+  }
+}

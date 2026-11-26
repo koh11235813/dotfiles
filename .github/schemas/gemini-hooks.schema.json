@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "additionalProperties": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "command"],
+        "properties": {
+          "type": { "type": "string", "enum": ["command"] },
+          "command": { "type": "string" },
+          "timeout": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}
