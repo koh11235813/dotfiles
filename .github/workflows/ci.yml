@@ -17,7 +17,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y zsh
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
+          sh -c "$(curl -fsLS --retry 5 --retry-delay 5 --retry-all-errors https://get.chezmoi.io)" -- -b /usr/local/bin
       - name: Lint shell scripts and rendered templates
         run: bash .github/scripts/lint-sh.sh --require-shellcheck
 
@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install chezmoi
-        run: sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
+        run: sh -c "$(curl -fsLS --retry 5 --retry-delay 5 --retry-all-errors https://get.chezmoi.io)" -- -b /usr/local/bin
       - name: Run Codex hook tests
         run: python3 dot_codex/hooks/tests/test_permission_review.py
       - name: Run chezmoi dotfiles verification

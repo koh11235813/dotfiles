@@ -29,11 +29,11 @@ run_shellcheck() {
   local extra=()
   case $rel in
     dot_claude/scripts/executable_statusline-command.sh)
-      extra=(-e SC2034,SC2154) ;;
+      extra=(-e SC2034 -e SC2154) ;;
     dot_config/waybar/scripts/executable_brightness_ascii.sh)
       extra=(-e SC2059) ;;
     dot_config/waybar/scripts/executable_volume_ascii.sh)
-      extra=(-e SC2046,SC2059) ;;
+      extra=(-e SC2046 -e SC2059) ;;
   esac
   shellcheck --severity=warning "${extra[@]}" "$file"
 }
